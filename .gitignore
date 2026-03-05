@@ -1,0 +1,16 @@
+node_modules/
+.next/
+backend/venv/
+**/.env*
+**/__pycache__/
+*.pdf
+.env*.local
+.DS_Store
+.Python
+*.pyc
+*.pyo
+*.egg-info/
+venv/
+env/
+build/
+dist/
