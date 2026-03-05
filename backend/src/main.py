@@ -15,7 +15,18 @@ load_dotenv()
 
 app = FastAPI(title="ProFuturo AI Analytics Backend")
 
-origins = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
+origins = [
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:3001",
+    "http://0.0.0.0:3000",
+    "http://0.0.0.0:3001",
+]
+custom_origins = os.getenv("CORS_ORIGINS", "").split(",")
+if custom_origins and custom_origins[0]:
+    origins.extend([o.strip() for o in custom_origins if o.strip()])
+
 
 app.add_middleware(
     CORSMiddleware,
