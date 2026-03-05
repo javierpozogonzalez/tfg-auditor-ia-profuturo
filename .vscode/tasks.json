@@ -4,19 +4,9 @@
     {
       "label": "Backend: Start FastAPI",
       "type": "shell",
-      "command": "cd ${workspaceFolder}/backend && source venv/bin/activate && python -m uvicorn src.main:app --reload --host 0.0.0.0 --port 8000",
+      "command": "cd ${workspaceFolder}/backend && source venv/bin/activate && PYTHONWARNINGS=ignore python -m uvicorn src.main:app --reload --host 0.0.0.0 --port 8000",
       "isBackground": true,
-      "problemMatcher": {
-        "pattern": {
-          "regexp": "^(.*)$",
-          "line": 1
-        },
-        "background": {
-          "activeOnStart": true,
-          "beginsPattern": ".*",
-          "endsPattern": ".*Application startup complete.*"
-        }
-      },
+      "problemMatcher": [],
       "presentation": {
         "group": "dev",
         "reveal": "always",
@@ -31,17 +21,7 @@
         "cwd": "${workspaceFolder}"
       },
       "isBackground": true,
-      "problemMatcher": {
-        "pattern": {
-          "regexp": "^(.*)$",
-          "line": 1
-        },
-        "background": {
-          "activeOnStart": true,
-          "beginsPattern": ".*",
-          "endsPattern": ".*(Local:|started server on).*"
-        }
-      },
+      "problemMatcher": [],
       "presentation": {
         "group": "dev",
         "reveal": "always",
