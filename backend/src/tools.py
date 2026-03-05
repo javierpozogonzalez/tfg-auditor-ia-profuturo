@@ -39,6 +39,23 @@ def _looks_like_table_separator(line: str) -> bool:
     return bool(re.match(r"^\s*\|?\s*[:\-]+\s*(\|\s*[:\-]+\s*)+\|?\s*$", line))
 
 
+def _calculate_col_widths(col_count: int) -> tuple:
+    if col_count <= 0:
+        return (70,)
+    if col_count == 1:
+        return (70,)
+    if col_count == 2:
+        return (35, 35)
+    if col_count == 3:
+        return (15, 55, 15)
+    if col_count == 4:
+        return (12, 35, 12, 12)
+    
+    base_width = 70 / col_count
+    return tuple(base_width for _ in range(col_count))
+
+
+
 def _fit_text(pdf: PDF, text: str, width: float) -> str:
     value = _clean_line(text)
     if not value:
@@ -63,42 +80,27 @@ def _render_table(pdf: PDF, rows: list[list[str]]):
     headers = normalized_rows[0] + [""] * (column_count - len(normalized_rows[0]))
     data_rows = [row + [""] * (column_count - len(row)) for row in normalized_rows[1:]]
 
-    table_width = pdf.w - pdf.l_margin - pdf.r_margin
-    col_width = table_width / max(column_count, 1)
-
-    pdf.set_font("Helvetica", "B", 9)
-    pdf.set_text_color(255, 255, 255)
-    pdf.set_fill_color(0, 80, 160)
-    for header_cell in headers:
-        pdf.cell(col_width, 8, _fit_text(pdf, header_cell, col_width), border=1, fill=True)
-    pdf.ln()
-
-    pdf.set_font("Helvetica", "", 9)
-    pdf.set_text_color(35, 35, 35)
-    for idx, row_data in enumerate(data_rows):
-        if pdf.get_y() > pdf.h - 25:
-            pdf.add_page()
-            pdf.set_font("Helvetica", "B", 9)
+    col_widths = _calculate_col_widths(column_count)
+    
+    with pdf.table(borders=1, cell_fill_color=(0, 80, 160), text_align="CENTER", line_height=5) as table:
+        for header_cell in headers:
+            cell = table.row()
+            cell.style = pdf.set_font("Helvetica", "B", 9)
             pdf.set_text_color(255, 255, 255)
-            pdf.set_fill_color(0, 80, 160)
-            for header_cell in headers:
-                pdf.cell(col_width, 8, _fit_text(pdf, header_cell, col_width), border=1, fill=True)
-            pdf.ln()
-            pdf.set_font("Helvetica", "", 9)
+            cell(text=_clean_line(header_cell))
+        
+        for idx, row_data in enumerate(data_rows):
             pdf.set_text_color(35, 35, 35)
-
-        row_fill = 245 if idx % 2 == 0 else 255
-        pdf.set_fill_color(row_fill, row_fill, row_fill)
-        for cell in row_data:
-            pdf.cell(col_width, 7, _fit_text(pdf, cell, col_width), border=1, fill=True)
-        pdf.ln()
-    pdf.ln(3)
+            row = table.row()
+            for cell_text in row_data:
+                row(text=_clean_line(cell_text))
+    
+    pdf.ln(4)
 
 
 def generate_report_pdf(text: str, title: str) -> str:
     try:
         markdown_text = text or ""
-        _ = markdown2.markdown(markdown_text, extras=["tables"])
 
         pdf = PDF("Reporte de Auditoria IA - ProFuturo")
         pdf.set_auto_page_break(auto=True, margin=15)
@@ -127,12 +129,17 @@ def generate_report_pdf(text: str, title: str) -> str:
                 index += 1
                 continue
 
-            is_table_header = raw_line.count("|") >= 2 and index + 1 < len(lines) and _looks_like_table_separator(lines[index + 1])
+            is_table_header = (raw_line.count("|") >= 2 and 
+                             index + 1 < len(lines) and 
+                             _looks_like_table_separator(lines[index + 1]))
 
             if is_table_header:
                 table_lines = [raw_line]
                 index += 2
                 while index < len(lines) and lines[index].count("|") >= 2:
+                    if _looks_like_table_separator(lines[index]):
+                        index += 1
+                        continue
                     table_lines.append(lines[index])
                     index += 1
 
@@ -140,6 +147,7 @@ def generate_report_pdf(text: str, title: str) -> str:
                 for table_line in table_lines:
                     cells = [c.strip() for c in table_line.strip().strip("|").split("|")]
                     parsed_rows.append(cells)
+                
                 _render_table(pdf, parsed_rows)
                 continue
 
