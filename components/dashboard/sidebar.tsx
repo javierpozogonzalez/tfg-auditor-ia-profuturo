@@ -36,8 +36,6 @@ export function DashboardSidebar() {
 
   return (
     <aside className="flex h-screen w-72 flex-col bg-sidebar text-sidebar-foreground">
-      <div className="flex items-center gap-3 px-6 py-5">
-
       <Separator className="bg-sidebar-border" />
 
       <div className="px-5 py-5">
