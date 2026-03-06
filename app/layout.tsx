@@ -9,10 +9,6 @@ const _geistMono = Geist_Mono({ subsets: ["latin"] });
 export const metadata: Metadata = {
   title: 'ProFuturo AI Analytics Dashboard',
   description: 'Panel de administración de Inteligencia de Negocio para moderadores de foros educativos',
-  icons: {
-    icon: '/logo.png',
-    apple: '/logo.png',
-  },
 }
 
 export default function RootLayout({
