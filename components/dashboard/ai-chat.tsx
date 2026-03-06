@@ -193,15 +193,15 @@ export function AiChat() {
                     </AvatarFallback>
                   </Avatar>
                   <div
-                    className={`max-w-[90%] rounded-xl px-3.5 py-2.5 ${msg.role === "ai"
+                    className={`max-w-[80%] rounded-xl px-3.5 py-2.5 ${msg.role === "ai"
                         ? "bg-muted text-foreground"
                         : "bg-primary text-primary-foreground"
                       } ${msg.loading ? "animate-pulse" : ""}`}
                   >
                     {msg.loading || msg.role === "user" ? (
-                      <p className="text-sm leading-relaxed">{msg.content}</p>
+                      <p className="text-sm leading-relaxed whitespace-normal">{msg.content}</p>
                     ) : (
-                      <div className="prose prose-sm max-w-none text-foreground prose-headings:text-foreground prose-strong:text-foreground prose-p:leading-relaxed prose-ul:my-1 prose-li:my-0 overflow-x-auto break-words">
+                      <div className="prose prose-sm w-full text-foreground prose-headings:text-foreground prose-strong:text-foreground prose-p:leading-relaxed prose-ul:my-1 prose-li:my-0 whitespace-normal">
                         <ReactMarkdown>{msg.content}</ReactMarkdown>
                       </div>
                     )}
