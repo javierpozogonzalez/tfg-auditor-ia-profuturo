@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Brain, ShieldCheck, FileBarChart, Trophy } from "lucide-react"
+import { ShieldCheck, FileBarChart, Trophy } from "lucide-react"
 import {
   Select,
   SelectContent,
@@ -37,16 +37,6 @@ export function DashboardSidebar() {
   return (
     <aside className="flex h-screen w-72 flex-col bg-sidebar text-sidebar-foreground">
       <div className="flex items-center gap-3 px-6 py-5">
-        <div className="flex size-9 items-center justify-center rounded-lg bg-sidebar-accent">
-          <Brain className="size-5 text-sidebar-foreground" />
-        </div>
-        <div>
-          <h1 className="text-sm font-bold tracking-tight text-sidebar-foreground">
-            ProFuturo AI
-          </h1>
-          <p className="text-xs text-sidebar-foreground/70">Analytics Dashboard</p>
-        </div>
-      </div>
 
       <Separator className="bg-sidebar-border" />
 
