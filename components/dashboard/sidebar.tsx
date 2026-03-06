@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import Image from "next/image"
 import { ShieldCheck, FileBarChart, Trophy } from "lucide-react"
 import {
   Select,
@@ -36,6 +37,15 @@ export function DashboardSidebar() {
 
   return (
     <aside className="flex h-screen w-72 flex-col bg-sidebar text-sidebar-foreground">
+      <div className="flex items-center justify-center px-6 py-5">
+        <Image
+          src="/logo.png"
+          alt="ProFuturo Logo"
+          width={120}
+          height={60}
+          priority
+        />
+      </div>
       <Separator className="bg-sidebar-border" />
 
       <div className="px-5 py-5">
