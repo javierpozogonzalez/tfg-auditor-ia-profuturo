@@ -1,6 +1,8 @@
 import os
 import asyncio
 import base64
+import logging
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
@@ -8,12 +10,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from src.agent import run_agent
+from scripts.rpa import start_scheduler
 
 _executor = ThreadPoolExecutor(max_workers=4)
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
 app = FastAPI(title="ProFuturo AI Analytics Backend")
+
+@app.on_event("startup")
+def start_rpa():
+    threading.Thread(target=start_scheduler, daemon=True).start()
+    logger.info("RPA Scheduler arrancado en background")
 
 origins = [
     "http://localhost:3000",

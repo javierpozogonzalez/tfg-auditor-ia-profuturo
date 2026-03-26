@@ -16,7 +16,7 @@ export default function DashboardPage() {
             <DataPanel />
           </section>
 
-          <section className="w-[420px] shrink-0" aria-label="Asistente IA">
+          <section className="w-[560px] shrink-0" aria-label="Asistente IA">
             <AiChat />
           </section>
         </main>

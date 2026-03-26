@@ -9,6 +9,7 @@ from langchain_core.tools import tool
 from langchain_core.messages import SystemMessage, HumanMessage
 from langgraph.prebuilt import create_react_agent
 
+from scripts.utils import add_months, format_month_year_es, get_reporting_periods, apply_current_report_dates, is_noise_record, to_date_key
 from src.llm_config import get_llm
 from src.tools import generate_report_pdf
 
@@ -17,27 +18,6 @@ load_dotenv()
 NEO4J_URI = os.getenv("NEO4J_URI")
 NEO4J_USER = os.getenv("NEO4J_USER")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
-
-def _is_noise_record(topic: str, content: str) -> bool:
-    joined = f"{topic} {content}".strip().lower()
-    if not joined:
-        return False
-    return bool(re.search(r"\b(prueba|test|testing|demo|hilo de prueba|qa|sandbox)\b", joined))
-
-def _to_date_key(raw_date) -> str:
-    if raw_date is None:
-        return "sin-fecha"
-    try:
-        year = getattr(raw_date, "year", None)
-        month = getattr(raw_date, "month", None)
-        if year and month:
-            return f"{int(year):04d}-{int(month):02d}"
-    except Exception:
-        pass
-    value = str(raw_date)
-    if len(value) >= 7 and value[4] == "-":
-        return value[:7]
-    return "sin-fecha"
 
 @tool
 def get_monthly_directive_report(community: str = "todas") -> str:
@@ -67,7 +47,7 @@ def get_monthly_directive_report(community: str = "todas") -> str:
     for row in rows:
         topic = str(row.get("topic") or "sin tema").strip()
         text = str(row.get("text") or "").strip()
-        if _is_noise_record(topic, text):
+        if is_noise_record(topic, text):
             continue
         cleaned.append({
             "author": str(row.get("author") or "Anonimo").strip(),
@@ -86,7 +66,7 @@ def get_monthly_directive_report(community: str = "todas") -> str:
     unique_authors = set()
 
     for row in cleaned:
-        month_counter[_to_date_key(row.get("date"))] += 1
+        month_counter[to_date_key(row.get("date"))] += 1
         topic_counter[row["topic"]] += 1
         community_counter[row["community"]] += 1
         unique_authors.add(row["author"])
@@ -101,9 +81,14 @@ def get_monthly_directive_report(community: str = "todas") -> str:
 
     top_topics = sorted(topic_counter.items(), key=lambda item: item[1], reverse=True)[:5]
     
+    report_month_label, generation_month_label, next_review_month_label = get_reporting_periods()
+
     report = [
         f"Comunidad objetivo: {community}",
-        f"Mes de referencia: {active_month}",
+        f"Mes de referencia: {report_month_label}",
+        f"Fecha de generación: {generation_month_label}",
+        f"Próxima revisión: {next_review_month_label}",
+        f"Último mes con datos: {active_month}",
         f"Publicaciones válidas analizadas: {len(cleaned)}",
         f"Autores únicos: {len(unique_authors)}",
         f"Publicaciones mes activo: {active_count}",
@@ -146,7 +131,7 @@ def get_forum_context(community: str = "todas", limit: int = 50) -> str:
         topic = str(rec.get("subject") or "sin tema").strip()
         text = str(rec.get("text") or "").strip()
         author = str(rec.get("author") or "Anonimo").strip()
-        if not _is_noise_record(topic, text):
+        if not is_noise_record(topic, text):
             short_text = (text[:250] + "...") if len(text) > 250 else text
             filtered.append(f"Hilo: {topic} | Autor: {author} | Msg: {short_text}")
 
@@ -187,6 +172,8 @@ def run_agent(input_text: str, community: str = "todas") -> dict:
     if pdf_match:
         title = pdf_match.group(1).strip()
         final_response = final_response[:pdf_match.start()].rstrip()
+
+        final_response = apply_current_report_dates(final_response)
         
         pdf_ready_text = final_response.encode("latin-1", "ignore").decode("latin-1")
         pdf_base64 = generate_report_pdf(pdf_ready_text, title)
@@ -194,6 +181,8 @@ def run_agent(input_text: str, community: str = "todas") -> dict:
         safe_title = re.sub(r"[^\w\s-]", "", title).strip().replace(" ", "_")[:60]
         pdf_filename = f"{safe_title}.pdf" if safe_title else "reporte.pdf"
         final_response += f"\n\n[PDF generado: {pdf_filename}]"
+
+    final_response = apply_current_report_dates(final_response)
 
     return {
         "response": final_response,

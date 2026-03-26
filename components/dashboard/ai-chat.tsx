@@ -193,7 +193,7 @@ export function AiChat() {
                     </AvatarFallback>
                   </Avatar>
                   <div
-                    className={`max-w-[80%] rounded-xl px-3.5 py-2.5 ${msg.role === "ai"
+                    className={`max-w-[95%] rounded-xl px-3.5 py-2.5 ${msg.role === "ai"
                         ? "bg-muted text-foreground"
                         : "bg-primary text-primary-foreground"
                       } ${msg.loading ? "animate-pulse" : ""}`}
