@@ -42,7 +42,7 @@ def get_llm():
     client = session.client("sagemaker-runtime")
 
     return SagemakerEndpoint(
-        endpoint_name="profuturo-cerebro-qwen-7b",
+        endpoint_name="profuturo-cerebro-qwen-7b-v2",
         client=client,
         content_handler=QwenChatMLContentHandler(),
         model_kwargs={

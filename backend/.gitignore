@@ -22,3 +22,6 @@ env/
 # Output
 backend/output/
 *.pdf
+
+data/datos_profuturo.csv
+data/datoset_profuturo.jsonl

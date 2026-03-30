@@ -5,9 +5,9 @@ from typing import Optional
 
 from dotenv import load_dotenv
 from neo4j import GraphDatabase
+from langchain.agents import create_react_agent, AgentExecutor
 from langchain_core.tools import tool
-from langchain_core.messages import SystemMessage, HumanMessage
-from langgraph.prebuilt import create_react_agent
+from langchain_core.prompts import PromptTemplate
 
 from scripts.utils import add_months, format_month_year_es, get_reporting_periods, apply_current_report_dates, is_noise_record, to_date_key
 from src.llm_config import get_llm
@@ -143,30 +143,43 @@ def get_forum_context(community: str = "todas", limit: int = 50) -> str:
 tools = [get_monthly_directive_report, get_forum_context]
 llm = get_llm()
 
-system_message = SystemMessage(content=(
-    "Eres el Auditor IA de ProFuturo.\n"
-    "REGLAS OBLIGATORIAS:\n"
-    "1. Antes de responder cualquier consulta, debes invocar al menos una herramienta de Neo4j.\n"
-    "2. Nunca inventes datos, métricas, nombres, fechas ni conclusiones.\n"
-    "3. Todas las respuestas y reportes deben basarse exclusivamente en el contexto devuelto por las herramientas.\n"
-    "4. Si el usuario pide métricas o informe directivo, usa get_monthly_directive_report.\n"
-    "5. Si el usuario pide resumen, temas o preguntas específicas, usa get_forum_context.\n"
-    "6. Si no hay datos suficientes en herramientas, indícalo explícitamente y no completes con suposiciones.\n"
-    "7. Responde siempre en Markdown estructurado (##, -, **).\n"
-    "8. Si el usuario solicita generar un reporte, informe o PDF para descargar, incluye exactamente al final la etiqueta: "
-    "[GENERATE_PDF: Titulo_Del_Documento]"
-))
+react_template = """Eres el Auditor IA de ProFuturo.
+POLITICA OPERATIVA ESTRICTA:
+1. Obligacion absoluta: usa las herramientas de Neo4j antes de responder.
+2. Prohibido inventar datos. Basa tus respuestas solo en el contexto recuperado.
+3. Responde siempre en Markdown estructurado.
+4. Si se solicita un reporte o PDF, incluye exactamente al final: [GENERATE_PDF: Titulo_Del_Documento]
 
-agent_executor = create_react_agent(llm, tools, prompt=system_message)
+Tienes acceso a las siguientes herramientas:
+{tools}
+
+Usa estrictamente el siguiente formato:
+
+Question: la consulta del usuario
+Thought: que necesitas hacer
+Action: la herramienta a usar, debe ser una de [{tool_names}]
+Action Input: el parametro de entrada para la herramienta
+Observation: el resultado devuelto por la herramienta
+... (este ciclo puede repetirse)
+Thought: ya tengo los datos necesarios
+Final Answer: la respuesta final al usuario basada en los datos
+
+Comienza.
+
+Question: {input}
+{agent_scratchpad}"""
+
+prompt = PromptTemplate.from_template(react_template)
+agent = create_react_agent(llm, tools, prompt)
+agent_executor = AgentExecutor(agent=agent, tools=tools, handle_parsing_errors=True, max_iterations=5)
 
 def run_agent(input_text: str, community: str = "todas") -> dict:
     if not input_text.strip():
         return {"response": "Por favor, ingresa una consulta.", "pdf_base64": None, "pdf_filename": ""}
 
-    inputs = {"messages": [HumanMessage(content=f"Comunidad: {community}. Consulta: {input_text}")]}
-    
-    result = agent_executor.invoke(inputs)
-    final_response = result["messages"][-1].content
+    query = f"Comunidad: {community}. Consulta: {input_text}"
+    result = agent_executor.invoke({"input": query})
+    final_response = result.get("output", "")
 
     pdf_match = re.search(r"\[GENERATE_PDF:\s*([^\]]+)\]", final_response)
     pdf_base64 = None
