@@ -415,9 +415,9 @@ ChatBedrock(
 ```
 
 **Variables de Entorno Requeridas**:
-- `REGION_BEDROCK`: Región AWS (e.g., us-west-2)
-- `AWS_ACCESS_KEY`: Credencial IAM
-- `AWS_SECRET_KEY`: Credencial IAM
+- `AWS_REGION`: Región AWS (e.g., us-west-2)
+- `AWS_ACCESS_KEY_ID`: Credencial IAM
+- `AWS_SECRET_ACCESS_KEY`: Credencial IAM
 
 **Futuro**: Modelo local con Ollama en EC2 (comentado en código)
 
@@ -620,9 +620,9 @@ NEO4J_USER=neo4j
 NEO4J_PASSWORD=<your_password>
 
 # AWS Bedrock
-REGION_BEDROCK=us-west-2
-AWS_ACCESS_KEY=<your_key>
-AWS_SECRET_KEY=<your_secret>
+AWS_REGION=us-west-2
+AWS_ACCESS_KEY_ID=<your_key>
+AWS_SECRET_ACCESS_KEY=<your_secret>
 
 # CORS (opcional)
 CORS_ORIGINS=http://localhost:3000,http://localhost:3001

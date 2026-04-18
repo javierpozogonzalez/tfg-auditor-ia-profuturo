@@ -1,16 +1,48 @@
+# Dependencies
 node_modules/
-.next/
 backend/venv/
-**/.env*
+venv/
+env/
+
+# Next.js build output
+.next/
+build/
+dist/
+
+# Environment files (never commit secrets)
+.env
+.env.local
+**/.env
+**/.env.local
+**/.env.*.local
+backend/.env
+
+# Python
 **/__pycache__/
-*.pdf
-.env*.local
-.DS_Store
-.Python
 *.pyc
 *.pyo
 *.egg-info/
-venv/
-env/
-build/
-dist/
+.Python
+
+# Logs
+*.log
+
+# System
+.DS_Store
+
+# TypeScript incremental build
+tsconfig.tsbuildinfo
+
+# AWS / model artifacts
+*.tar.gz
+
+# Sensitive data
+backend/data/datos_profuturo.csv
+backend/data/dataset_profuturo.jsonl
+backend/data/*.jsonl
+backend/dataset_*.jsonl
+backend/train.jsonl
+
+# Generated output
+*.pdf
+backend/alerts/

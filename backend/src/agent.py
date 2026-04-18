@@ -1,16 +1,15 @@
 import os
 import re
 from collections import defaultdict
-from typing import Optional
 
 from dotenv import load_dotenv
-from neo4j import GraphDatabase
-from langchain.agents import create_react_agent, AgentExecutor
-from langchain_core.tools import tool
+from langchain.memory import ConversationBufferMemory
 from langchain_core.prompts import PromptTemplate
+from langchain_core.messages import HumanMessage, AIMessage
+from neo4j import GraphDatabase
 
-from scripts.utils import add_months, format_month_year_es, get_reporting_periods, apply_current_report_dates, is_noise_record, to_date_key
-from src.llm_config import get_llm
+from scripts.utils import get_reporting_periods, apply_current_report_dates, is_noise_record, to_date_key
+from src.llm_config import get_profuturo_llm
 from src.tools import generate_report_pdf
 
 load_dotenv()
@@ -19,7 +18,41 @@ NEO4J_URI = os.getenv("NEO4J_URI")
 NEO4J_USER = os.getenv("NEO4J_USER")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
 
-@tool
+REPORT_HINTS = re.compile(r"\b(reporte|resumen|informe|pdf|kpi|kpis|m[eé]trica|m[eé]tricas|estad[ií]stica|estad[ií]sticas|an[aá]lisis)\b", re.IGNORECASE)
+
+_conversation_memories: dict[str, ConversationBufferMemory] = {}
+_profuturo_llm = get_profuturo_llm()
+
+
+def _get_memory(community: str) -> ConversationBufferMemory:
+    memory = _conversation_memories.get(community)
+    if memory is None:
+        memory = ConversationBufferMemory(
+            memory_key="history",
+            input_key="input",
+            return_messages=True,
+        )
+        _conversation_memories[community] = memory
+    return memory
+
+
+def _history_to_chatml(memory: ConversationBufferMemory) -> str:
+    blocks: list[str] = []
+    for msg in memory.chat_memory.messages:
+        content = str(msg.content).strip()
+        if isinstance(msg, HumanMessage):
+            if content.startswith("<|im_start|>user"):
+                blocks.append(content)
+            else:
+                blocks.append(f"<|im_start|>user\n{content}<|im_end|>")
+        elif isinstance(msg, AIMessage):
+            if content.startswith("<|im_start|>assistant"):
+                blocks.append(content)
+            else:
+                blocks.append(f"<|im_start|>assistant\n{content}<|im_end|>")
+    return "\n".join(blocks) + ("\n" if blocks else "")
+
+
 def get_monthly_directive_report(community: str = "todas") -> str:
     """Genera un reporte directivo mensual estricto con KPIs y métricas cuantitativas de una comunidad."""
     driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
@@ -80,7 +113,6 @@ def get_monthly_directive_report(community: str = "todas") -> str:
     delta_pct = (delta / previous_count * 100.0) if previous_count > 0 else 0.0
 
     top_topics = sorted(topic_counter.items(), key=lambda item: item[1], reverse=True)[:5]
-    
     report_month_label, generation_month_label, next_review_month_label = get_reporting_periods()
 
     report = [
@@ -93,14 +125,14 @@ def get_monthly_directive_report(community: str = "todas") -> str:
         f"Autores únicos: {len(unique_authors)}",
         f"Publicaciones mes activo: {active_count}",
         f"Variación vs mes anterior: {delta:+d} ({delta_pct:+.1f}%)" if previous_month else "Variación: N/D",
-        "Top Hilos:"
+        "Top Hilos:",
     ]
     for t, c in top_topics:
         report.append(f"- {t}: {c} posts")
 
     return "\n".join(report)
 
-@tool
+
 def get_forum_context(community: str = "todas", limit: int = 50) -> str:
     """Extrae los mensajes recientes de los foros para resumir temas o responder preguntas específicas de los usuarios."""
     driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
@@ -137,49 +169,65 @@ def get_forum_context(community: str = "todas", limit: int = 50) -> str:
 
     if not filtered:
         return "No hay datos recientes en esta comunidad."
-    
+
     return "\n".join(filtered)
 
-tools = [get_monthly_directive_report, get_forum_context]
-llm = get_llm()
 
-react_template = """Eres el Auditor IA de ProFuturo.
-POLITICA OPERATIVA ESTRICTA:
-1. Obligacion absoluta: usa las herramientas de Neo4j antes de responder.
-2. Prohibido inventar datos. Basa tus respuestas solo en el contexto recuperado.
-3. Responde siempre en Markdown estructurado.
-4. Si se solicita un reporte o PDF, incluye exactamente al final: [GENERATE_PDF: Titulo_Del_Documento]
+def _build_base_context(input_text: str, community: str) -> str:
+    context_parts = [
+        f"Comunidad: {community}",
+        "Contexto de foros reciente:",
+        get_forum_context(community=community, limit=60),
+    ]
 
-Tienes acceso a las siguientes herramientas:
-{tools}
+    if REPORT_HINTS.search(input_text):
+        context_parts.extend([
+            "Resumen directivo mensual:",
+            get_monthly_directive_report(community=community),
+        ])
 
-Usa estrictamente el siguiente formato:
+    return "\n\n".join(context_parts)
 
-Question: la consulta del usuario
-Thought: que necesitas hacer
-Action: la herramienta a usar, debe ser una de [{tool_names}]
-Action Input: el parametro de entrada para la herramienta
-Observation: el resultado devuelto por la herramienta
-... (este ciclo puede repetirse)
-Thought: ya tengo los datos necesarios
-Final Answer: la respuesta final al usuario basada en los datos
 
-Comienza.
+prompt = PromptTemplate.from_template(
+    """<|im_start|>system
+Eres el Auditor IA de ProFuturo.
 
-Question: {input}
-{agent_scratchpad}"""
+Comunidad activa:
+{community}
 
-prompt = PromptTemplate.from_template(react_template)
-agent = create_react_agent(llm, tools, prompt)
-agent_executor = AgentExecutor(agent=agent, tools=tools, handle_parsing_errors=True, max_iterations=5)
+Contexto base de ProFuturo:
+{context}
+
+Instrucciones:
+- Responde solo con informacion sustentada en el contexto y la memoria.
+- No inventes datos.
+- Manten la respuesta en Markdown claro y profesional.
+- Si el usuario solicita un reporte descargable o PDF, termina exactamente con: [GENERATE_PDF: Titulo_Del_Documento]
+<|im_end|>
+{history}<|im_start|>user
+{input}<|im_end|>
+<|im_start|>assistant
+"""
+)
+
 
 def run_agent(input_text: str, community: str = "todas") -> dict:
     if not input_text.strip():
         return {"response": "Por favor, ingresa una consulta.", "pdf_base64": None, "pdf_filename": ""}
 
-    query = f"Comunidad: {community}. Consulta: {input_text}"
-    result = agent_executor.invoke({"input": query})
-    final_response = result.get("output", "")
+    memory = _get_memory(community)
+    chain = prompt | _profuturo_llm
+    context = _build_base_context(input_text, community)
+    history = _history_to_chatml(memory)
+    final_response = str(
+        chain.invoke({
+            "input": input_text,
+            "community": community,
+            "context": context,
+            "history": history,
+        })
+    ).strip()
 
     pdf_match = re.search(r"\[GENERATE_PDF:\s*([^\]]+)\]", final_response)
     pdf_base64 = None
@@ -188,20 +236,22 @@ def run_agent(input_text: str, community: str = "todas") -> dict:
     if pdf_match:
         title = pdf_match.group(1).strip()
         final_response = final_response[:pdf_match.start()].rstrip()
-
         final_response = apply_current_report_dates(final_response)
-        
+
         pdf_ready_text = final_response.encode("latin-1", "ignore").decode("latin-1")
         pdf_base64 = generate_report_pdf(pdf_ready_text, title)
-        
+
         safe_title = re.sub(r"[^\w\s-]", "", title).strip().replace(" ", "_")[:60]
         pdf_filename = f"{safe_title}.pdf" if safe_title else "reporte.pdf"
         final_response += f"\n\n[PDF generado: {pdf_filename}]"
 
     final_response = apply_current_report_dates(final_response)
 
+    memory.chat_memory.add_user_message(f"<|im_start|>user\n{input_text}<|im_end|>")
+    memory.chat_memory.add_ai_message(f"<|im_start|>assistant\n{final_response}<|im_end|>")
+
     return {
         "response": final_response,
         "pdf_base64": pdf_base64,
-        "pdf_filename": pdf_filename
+        "pdf_filename": pdf_filename,
     }

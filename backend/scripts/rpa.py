@@ -15,12 +15,11 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from dotenv import load_dotenv
-from langchain_core.messages import HumanMessage
 from neo4j import GraphDatabase
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from src.llm_config import get_llm, get_fast_llm
+from src.llm_config import get_profuturo_llm
 from src.tools import generate_report_pdf, generate_critical_alert_pdf
 from src.agent import run_agent
 
@@ -216,7 +215,7 @@ def _save_pdf(pdf_b64: str, filename: str) -> Path:
 def weekly_summary_job():
     logger.info("Iniciando weekly_summary_job")
     communities = get_communities_list()
-    llm = get_llm()
+    llm = get_profuturo_llm()
 
     for community in communities:
         try:
@@ -230,7 +229,7 @@ def weekly_summary_job():
                 for m in messages[:60]
             )
             prompt       = SUMMARY_PROMPT.format(community=community, messages=messages_text)
-            summary_text = llm.invoke([HumanMessage(content=prompt)]).content
+            summary_text = str(llm.invoke(prompt)).strip()
 
             title    = f"Resumen_Semanal_{re.sub(r'[^\\w]', '_', community)}_{datetime.now().strftime('%Y%m%d')}"
             pdf_path = _save_pdf(generate_report_pdf(summary_text, title), f"{title}.pdf")
@@ -243,7 +242,7 @@ def weekly_summary_job():
 def weekly_reminder_job():
     logger.info("Iniciando weekly_reminder_job")
     communities = get_communities_list()
-    llm = get_llm()
+    llm = get_profuturo_llm()
 
     for community in communities:
         try:
@@ -256,7 +255,7 @@ def weekly_reminder_job():
                 for m in messages[:20]
             )
             prompt  = REMINDER_PROMPT.format(community=community, context=context)
-            message = llm.invoke([HumanMessage(content=prompt)]).content
+            message = str(llm.invoke(prompt)).strip()
 
             driver = _get_driver()
             try:
@@ -284,7 +283,7 @@ def weekly_reminder_job():
 def critical_monitor_job():
     logger.info("Iniciando critical_monitor_job")
     communities = get_communities_list()
-    fast_llm    = get_fast_llm()
+    llm = get_profuturo_llm()
 
     for community in communities:
         try:
@@ -304,9 +303,9 @@ def critical_monitor_job():
                 for m in candidates[:10]
             )
 
-            severity_raw = fast_llm.invoke([
-                HumanMessage(content=SEVERITY_PROMPT.format(content=critical_text))
-            ]).content.strip().upper()
+            severity_raw = str(
+                llm.invoke(SEVERITY_PROMPT.format(content=critical_text))
+            ).strip().upper()
 
             severity = severity_raw if severity_raw in {"CRITICA", "ALTA", "MEDIA", "BAJA"} else "MEDIA"
             logger.info(f"Severidad clasificada [{severity}] en '{community}'")
