@@ -3,6 +3,7 @@ import asyncio
 import base64
 import logging
 import threading
+from contextlib import asynccontextmanager
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
@@ -10,19 +11,43 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from src.agent import run_agent
-from scripts.rpa import start_scheduler
+from src.chat_history import (
+    init_db,
+    create_conversation,
+    get_conversations_by_community,
+    get_messages as get_conv_messages,
+    save_message as save_conv_message,
+    update_conversation_title,
+    delete_conversation,
+    generate_title_from_message,
+)
+from scripts.rpa import (
+    start_scheduler, get_scheduler,
+    critical_monitor_job, weekly_summary_job,
+    unanswered_monitor_job, disconnection_risk_job, trending_topics_job,
+)
 
 _executor = ThreadPoolExecutor(max_workers=4)
 logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-app = FastAPI(title="ProFuturo AI Analytics Backend")
 
-@app.on_event("startup")
-def start_rpa():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
     threading.Thread(target=start_scheduler, daemon=True).start()
     logger.info("RPA Scheduler arrancado en background")
+
+    if os.getenv("AUTONOMOUS_AGENT_ENABLED", "false").lower() == "true":
+        from src.autonomous_agent import start_autonomous_scheduler
+        start_autonomous_scheduler()
+        logger.info("Agente autonomo iniciado")
+
+    yield
+
+
+app = FastAPI(title="ProFuturo AI Analytics Backend", lifespan=lifespan)
 
 origins = [
     "http://localhost:3000",
@@ -49,9 +74,17 @@ app.add_middleware(
 class ChatRequest(BaseModel):
     message: str
     community: str = "todas"
+    history: list[dict] = []
+    conversation_id: Optional[str] = None
+    files: Optional[list[dict]] = None
 
 
 class PDFData(BaseModel):
+    base64: str
+    filename: str
+
+
+class ExcelData(BaseModel):
     base64: str
     filename: str
 
@@ -60,7 +93,18 @@ class ChatResponse(BaseModel):
     response: str
     community: str
     pdf: Optional[PDFData] = None
+    excel: Optional[ExcelData] = None
     success: bool
+    conversation_id: Optional[str] = None
+
+
+class ConversationCreate(BaseModel):
+    community: str
+    title: Optional[str] = None
+
+
+class ConversationUpdate(BaseModel):
+    title: str
 
 
 def _neo4j_date_to_str(date_value) -> str:
@@ -76,19 +120,58 @@ def _neo4j_date_to_str(date_value) -> str:
     return raw[:10] if len(raw) >= 10 else raw
 
 
+_neo4j_driver = None
+
+
 def _get_neo4j_driver():
-    uri = os.getenv("NEO4J_URI")
-    user = os.getenv("NEO4J_USER")
-    password = os.getenv("NEO4J_PASSWORD")
-    if not uri or not user or not password:
-        raise RuntimeError("NEO4J_URI, NEO4J_USER and NEO4J_PASSWORD must be set")
-    from neo4j import GraphDatabase
-    return GraphDatabase.driver(uri, auth=(user, password))
+    global _neo4j_driver
+    if _neo4j_driver is None:
+        uri = os.getenv("NEO4J_URI")
+        user = os.getenv("NEO4J_USER")
+        password = os.getenv("NEO4J_PASSWORD")
+        if not uri or not user or not password:
+            raise RuntimeError("NEO4J_URI, NEO4J_USER and NEO4J_PASSWORD must be set")
+        from neo4j import GraphDatabase
+        _neo4j_driver = GraphDatabase.driver(uri, auth=(user, password))
+    return _neo4j_driver
 
 
 @app.get("/health")
 async def health_check():
     return {"status": "ok", "service": "ProFuturo AI Analytics"}
+
+
+# ── Conversations ──────────────────────────────────────────────────────────────
+
+@app.get("/api/conversations/{community}")
+async def list_conversations(community: str):
+    convs = get_conversations_by_community(community)
+    return {"conversations": convs}
+
+
+@app.post("/api/conversations")
+async def create_conversation_endpoint(body: ConversationCreate):
+    title = body.title or "Nueva conversación"
+    conv_id = create_conversation(body.community, title)
+    return {"id": conv_id, "title": title}
+
+
+@app.get("/api/conversations/{conversation_id}/messages")
+async def conversation_messages(conversation_id: str):
+    msgs = get_conv_messages(conversation_id)
+    return {"messages": msgs}
+
+
+@app.patch("/api/conversations/{conversation_id}")
+async def rename_conversation(conversation_id: str, body: ConversationUpdate):
+    update_conversation_title(conversation_id, body.title)
+    return {"success": True}
+
+
+@app.delete("/api/conversations/{conversation_id}")
+async def remove_conversation(conversation_id: str):
+    delete_conversation(conversation_id)
+    return {"success": True}
 
 
 @app.post("/api/chat")
@@ -100,7 +183,7 @@ async def chat(request: ChatRequest):
         loop = asyncio.get_event_loop()
         result = await asyncio.wait_for(
             loop.run_in_executor(
-                _executor, run_agent, request.message, request.community
+                _executor, run_agent, request.message, request.community, request.history
             ),
             timeout=600.0
         )
@@ -112,11 +195,34 @@ async def chat(request: ChatRequest):
                 filename=result.get("pdf_filename", "report.pdf"),
             )
 
+        excel_data = None
+        if result.get("excel_base64"):
+            excel_data = ExcelData(
+                base64=result["excel_base64"],
+                filename=result.get("excel_filename", "reporte.xlsx"),
+            )
+
+        response_text = result.get("response", "")
+
+        # Persist conversation (non-blocking, best-effort)
+        conv_id = request.conversation_id
+        try:
+            if not conv_id:
+                title = generate_title_from_message(request.message)
+                conv_id = create_conversation(request.community, title)
+            save_conv_message(conv_id, "user", request.message, request.files)
+            save_conv_message(conv_id, "assistant", response_text)
+        except Exception as _e:
+            logger.warning(f"Could not persist conversation: {_e}")
+            conv_id = None
+
         return ChatResponse(
-            response=result.get("response", ""),
+            response=response_text,
             community=request.community,
             pdf=pdf_data,
+            excel=excel_data,
             success=True,
+            conversation_id=conv_id,
         )
 
     except asyncio.TimeoutError:
@@ -124,6 +230,7 @@ async def chat(request: ChatRequest):
             response="La generacion del analisis y PDF supero el tiempo maximo permitido (600s). Reintenta.",
             community=request.community,
             pdf=None,
+            excel=None,
             success=False,
         )
     except Exception as e:
@@ -131,6 +238,7 @@ async def chat(request: ChatRequest):
             response=f"Error procesando la consulta: {str(e)}",
             community=request.community,
             pdf=None,
+            excel=None,
             success=False,
         )
 
@@ -139,6 +247,8 @@ async def chat(request: ChatRequest):
 async def chat_with_file(
     message: str = Form(...),
     community: str = Form("todas"),
+    history_json: str = Form("[]"),
+    conversation_id: Optional[str] = Form(None),
     file: Optional[UploadFile] = File(None)
 ):
     try:
@@ -149,20 +259,38 @@ async def chat_with_file(
         if file:
             content_bytes = await file.read()
             if file.filename and file.filename.endswith(".csv"):
-                file_content = content_bytes.decode("utf-8")
+                file_content = content_bytes.decode("utf-8", errors="replace")
             elif file.filename and file.filename.endswith(".pdf"):
-                file_content = f"[Archivo PDF adjunto: {file.filename}, {len(content_bytes)} bytes]"
+                try:
+                    import io
+                    from pypdf import PdfReader
+                    reader = PdfReader(io.BytesIO(content_bytes))
+                    pages = [p.extract_text() for p in reader.pages[:15] if p.extract_text()]
+                    extracted = "\n\n".join(pages).strip()
+                    file_content = (
+                        f"[Contenido del documento '{file.filename}']:\n{extracted}"
+                        if extracted
+                        else f"[PDF '{file.filename}' sin texto extraible]"
+                    )
+                except Exception as e:
+                    file_content = f"[PDF adjunto: {file.filename} — error al leer: {e}]"
             else:
                 file_content = f"[Archivo adjunto: {file.filename}]"
 
         enhanced_message = message
         if file_content:
-            enhanced_message = f"{message}\n\nArchivo adjunto:\n{file_content[:2000]}"
+            enhanced_message = f"{message}\n\nArchivo adjunto:\n{file_content[:4000]}"
+
+        import json as _json
+        try:
+            client_history = _json.loads(history_json)
+        except Exception:
+            client_history = []
 
         loop = asyncio.get_event_loop()
         result = await asyncio.wait_for(
             loop.run_in_executor(
-                _executor, run_agent, enhanced_message, community
+                _executor, run_agent, enhanced_message, community, client_history
             ),
             timeout=600.0
         )
@@ -174,11 +302,35 @@ async def chat_with_file(
                 filename=result.get("pdf_filename", "report.pdf"),
             )
 
+        excel_data = None
+        if result.get("excel_base64"):
+            excel_data = ExcelData(
+                base64=result["excel_base64"],
+                filename=result.get("excel_filename", "reporte.xlsx"),
+            )
+
+        response_text = result.get("response", "")
+
+        # Persist conversation (best-effort)
+        conv_id = conversation_id
+        try:
+            file_info = [{"name": file.filename, "type": file.content_type or "", "size": 0}] if file else None
+            if not conv_id:
+                title = generate_title_from_message(message)
+                conv_id = create_conversation(community, title)
+            save_conv_message(conv_id, "user", message, file_info)
+            save_conv_message(conv_id, "assistant", response_text)
+        except Exception as _e:
+            logger.warning(f"Could not persist conversation: {_e}")
+            conv_id = None
+
         return ChatResponse(
-            response=result.get("response", ""),
+            response=response_text,
             community=community,
             pdf=pdf_data,
+            excel=excel_data,
             success=True,
+            conversation_id=conv_id,
         )
 
     except asyncio.TimeoutError:
@@ -186,6 +338,7 @@ async def chat_with_file(
             response="La generacion del analisis y PDF supero el tiempo maximo permitido (600s). Reintenta.",
             community=community,
             pdf=None,
+            excel=None,
             success=False,
         )
     except Exception as e:
@@ -193,6 +346,7 @@ async def chat_with_file(
             response=f"Error procesando la consulta: {str(e)}",
             community=community,
             pdf=None,
+            excel=None,
             success=False,
         )
 
@@ -200,15 +354,11 @@ async def chat_with_file(
 @app.get("/api/communities")
 async def get_communities():
     driver = _get_neo4j_driver()
-    try:
-        with driver.session() as session:
-            results = session.run(
-                "MATCH (c:Community) RETURN c.name AS name ORDER BY c.name"
-            )
-            names = [record["name"] for record in results if record["name"]]
-    finally:
-        driver.close()
-
+    with driver.session() as session:
+        results = session.run(
+            "MATCH (c:Community) RETURN c.name AS name ORDER BY c.name"
+        )
+        names = [record["name"] for record in results if record["name"]]
     return {"communities": names}
 
 
@@ -273,8 +423,6 @@ async def get_feed(community: str = "todas"):
             status_code=500,
             detail=f"Error consultando Neo4j: {str(e)}",
         )
-    finally:
-        driver.close()
 
     return {
         "success": True,
@@ -326,10 +474,164 @@ async def get_graph(community: str = "todas"):
             ]
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error consultando Neo4j: {str(e)}")
-    finally:
-        driver.close()
 
     return {"success": True, "community": community, "edges": edges}
+
+
+@app.get("/api/rpa/status")
+async def rpa_status():
+    scheduler = get_scheduler()
+    if scheduler is None or not scheduler.running:
+        return {"running": False, "jobs": []}
+
+    jobs = []
+    for job in scheduler.get_jobs():
+        next_run = job.next_run_time
+        jobs.append({
+            "id": job.id,
+            "name": job.name,
+            "next_run": next_run.isoformat() if next_run else None,
+        })
+    return {"running": True, "jobs": jobs}
+
+
+@app.post("/api/rpa/trigger/{job_id}")
+async def rpa_trigger(job_id: str):
+    _fn_map = {
+        "critical_monitor":   critical_monitor_job,
+        "weekly_summary":     weekly_summary_job,
+        "unanswered_monitor": unanswered_monitor_job,
+        "disconnection_risk": disconnection_risk_job,
+        "trending_topics":    trending_topics_job,
+    }
+    if job_id not in _fn_map:
+        raise HTTPException(status_code=400, detail=f"job_id must be one of {set(_fn_map)}")
+
+    fn = _fn_map[job_id]
+    loop = asyncio.get_event_loop()
+    try:
+        await asyncio.wait_for(
+            loop.run_in_executor(_executor, fn),
+            timeout=300.0,
+        )
+        return {"success": True, "job_id": job_id, "message": f"Job '{job_id}' ejecutado correctamente"}
+    except asyncio.TimeoutError:
+        return {"success": False, "job_id": job_id, "message": "Timeout (300s) ejecutando el job"}
+    except Exception as e:
+        return {"success": False, "job_id": job_id, "message": str(e)}
+
+
+@app.get("/api/graph/stats")
+async def get_graph_stats(community: str = "todas"):
+    driver = _get_neo4j_driver()
+    try:
+        with driver.session() as session:
+            base = """
+            MATCH (a:Author)-[:WROTE]->(p:Post)-[:IN_DISCUSSION]->(d:Discussion)-[:PERTAINS_TO]->(c:Community)
+            """
+            where = "WHERE c.name = $community" if community != "todas" else ""
+            params = {"community": community} if community != "todas" else {}
+
+            stats_r = session.run(
+                f"{base} {where} RETURN count(DISTINCT a) AS users, count(p) AS posts, count(DISTINCT d) AS discussions",
+                **params,
+            ).single()
+
+            top_r = session.run(
+                f"{base} {where} RETURN a.name AS name, count(p) AS posts ORDER BY posts DESC LIMIT 5",
+                **params,
+            ).data()
+
+        if not stats_r:
+            return {"total_users": 0, "total_posts": 0, "total_discussions": 0, "top_connectors": [], "avg_posts_per_user": 0}
+
+        total_users = stats_r["users"] or 0
+        return {
+            "total_users": total_users,
+            "total_posts": stats_r["posts"] or 0,
+            "total_discussions": stats_r["discussions"] or 0,
+            "top_connectors": [r["name"] for r in top_r],
+            "avg_posts_per_user": round((stats_r["posts"] or 0) / max(total_users, 1), 1),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error consultando Neo4j: {str(e)}")
+
+
+@app.get("/api/rpa/logs")
+async def rpa_logs(lines: int = 50):
+    log_path = os.path.join(os.path.dirname(__file__), "..", "profuturo_rpa.log")
+    try:
+        with open(log_path, "r", encoding="utf-8") as f:
+            all_lines = f.readlines()
+        return {"lines": [l.rstrip() for l in all_lines[-lines:]]}
+    except FileNotFoundError:
+        return {"lines": []}
+
+
+# ── Agente autonomo — endpoints de testing y estado ───────────────────────────
+
+@app.get("/api/autonomous/status")
+async def autonomous_status():
+    if os.getenv("AUTONOMOUS_AGENT_ENABLED", "false").lower() != "true":
+        return {"enabled": False, "running": False, "jobs": []}
+
+    try:
+        from src.autonomous_agent import get_autonomous_scheduler
+        scheduler = get_autonomous_scheduler()
+    except ImportError:
+        return {"enabled": True, "running": False, "jobs": []}
+
+    if scheduler is None or not scheduler.running:
+        return {"enabled": True, "running": False, "jobs": []}
+
+    jobs = [
+        {
+            "id":       job.id,
+            "name":     job.name,
+            "next_run": job.next_run_time.isoformat() if job.next_run_time else None,
+        }
+        for job in scheduler.get_jobs()
+    ]
+    return {"enabled": True, "running": True, "jobs": jobs}
+
+
+@app.post("/api/autonomous/test-reactivation")
+async def test_reactivation():
+    try:
+        from src.autonomous_agent import reactivation_job
+        loop = asyncio.get_event_loop()
+        await asyncio.wait_for(
+            loop.run_in_executor(_executor, reactivation_job), timeout=120.0
+        )
+        return {"success": True, "job": "reactivation_job"}
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+@app.post("/api/autonomous/test-welcome")
+async def test_welcome():
+    try:
+        from src.autonomous_agent import welcome_job
+        loop = asyncio.get_event_loop()
+        await asyncio.wait_for(
+            loop.run_in_executor(_executor, welcome_job), timeout=120.0
+        )
+        return {"success": True, "job": "welcome_job"}
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+@app.post("/api/autonomous/test-mention")
+async def test_mention():
+    try:
+        from src.autonomous_agent import mention_response_job
+        loop = asyncio.get_event_loop()
+        await asyncio.wait_for(
+            loop.run_in_executor(_executor, mention_response_job), timeout=120.0
+        )
+        return {"success": True, "job": "mention_response_job"}
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
 
 
 if __name__ == "__main__":

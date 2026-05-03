@@ -7,13 +7,14 @@ import boto3
 from botocore.config import Config
 from dotenv import load_dotenv
 from langchain_core.language_models.llms import LLM
+from pydantic import PrivateAttr
 
 load_dotenv()
 logger = logging.getLogger(__name__)
 
 AWS_REGION = os.getenv("AWS_REGION", "eu-west-1")
 LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.1"))
-LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "512"))
+LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "2048"))
 
 
 class QwenTGILLM(LLM):
@@ -21,6 +22,8 @@ class QwenTGILLM(LLM):
     region_name: str = AWS_REGION
     temperature: float = LLM_TEMPERATURE
     max_new_tokens: int = LLM_MAX_TOKENS
+
+    _client: Any = PrivateAttr(default=None)
 
     @property
     def _llm_type(self) -> str:
@@ -35,14 +38,16 @@ class QwenTGILLM(LLM):
             "max_new_tokens": self.max_new_tokens,
         }
 
-    def _build_client(self):
-        return boto3.client(
-            "sagemaker-runtime",
-            region_name=self.region_name,
-            aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-            aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
-            config=Config(read_timeout=120, connect_timeout=10, retries={"max_attempts": 2}),
-        )
+    def _get_client(self):
+        if self._client is None:
+            self._client = boto3.client(
+                "sagemaker-runtime",
+                region_name=self.region_name,
+                aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+                aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+                config=Config(read_timeout=120, connect_timeout=10, retries={"max_attempts": 2}),
+            )
+        return self._client
 
     def _ensure_chatml(self, prompt: str) -> str:
         stripped = prompt.lstrip()
@@ -71,8 +76,7 @@ class QwenTGILLM(LLM):
         }
 
         try:
-            client = self._build_client()
-            response = client.invoke_endpoint(
+            response = self._get_client().invoke_endpoint(
                 EndpointName=self.endpoint_name,
                 ContentType="application/json",
                 Accept="application/json",
@@ -112,7 +116,3 @@ def get_profuturo_llm() -> QwenTGILLM:
         temperature=LLM_TEMPERATURE,
         max_new_tokens=LLM_MAX_TOKENS,
     )
-
-
-def get_llm() -> QwenTGILLM:
-    return get_profuturo_llm()

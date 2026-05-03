@@ -1,3 +1,10 @@
+"""
+Script de preparacion de datos (one-shot).
+Limpia el CSV bruto de foros ProFuturo: elimina HTML, emojis, duplicados
+y normaliza fechas, autores y nombres de comunidad.
+No forma parte del runtime del backend; se ejecuto una sola vez durante
+la fase de ingesta inicial (Fase 4 del proyecto).
+"""
 import pandas as pd
 import re
 from html import unescape
