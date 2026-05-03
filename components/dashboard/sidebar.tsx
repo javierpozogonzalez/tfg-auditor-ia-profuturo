@@ -22,10 +22,7 @@ export function DashboardSidebar() {
   const [communities, setCommunities] = useState<string[]>([])
 
   useEffect(() => {
-    fetch(`${API_URL}/api/communities`, {
-      // CAMBIO PARA FEEDBACK
-      headers: { 'ngrok-skip-browser-warning': 'true' },
-    })
+    fetch(`${API_URL}/api/communities`)
       .then((res) => res.json())
       .then((data) => {
         if (Array.isArray(data.communities)) {

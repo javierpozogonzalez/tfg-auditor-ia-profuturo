@@ -42,9 +42,7 @@ export function ForumFeed() {
           {
             method: "GET",
             headers: {
-              "Content-Type": "application/json",
-              // CAMBIO PARA FEEDBACK
-              'ngrok-skip-browser-warning': 'true',
+              "Content-Type": "application/json"
             },
             signal: controller.signal
           }
