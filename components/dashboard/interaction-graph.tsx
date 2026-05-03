@@ -6,7 +6,9 @@ import { Button } from "@/components/ui/button"
 import { Download, Share2, FileDown } from "lucide-react"
 import { useCommunity } from "@/lib/community-context"
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+// const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+// CAMBIO PARA FEEDBACK
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? ""
 
 interface GraphEdge {
   author: string

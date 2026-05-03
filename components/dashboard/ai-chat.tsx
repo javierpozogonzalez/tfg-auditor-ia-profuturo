@@ -38,7 +38,9 @@ interface ConversationItem {
   updated_at: string
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+// const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+// CAMBIO PARA FEEDBACK
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? ""
 const CHAT_TIMEOUT_MS = 600_000
 
 function triggerBinaryDownload(b64: string, filename: string, mimeType: string) {
