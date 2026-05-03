@@ -356,7 +356,11 @@ export function InteractionGraph() {
     try {
       const res = await fetch(
         `${API_URL}/api/graph?community=${encodeURIComponent(selectedCommunity)}`,
-        { signal: controller.signal }
+        {
+          // CAMBIO PARA FEEDBACK
+          headers: { 'ngrok-skip-browser-warning': 'true' },
+          signal: controller.signal,
+        }
       )
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = await res.json()

@@ -138,7 +138,10 @@ export function AiChat() {
 
   const fetchConversations = async (community: string) => {
     try {
-      const res = await fetch(`${API_URL}/api/conversations/${encodeURIComponent(community)}`)
+      const res = await fetch(`${API_URL}/api/conversations/${encodeURIComponent(community)}`, {
+        // CAMBIO PARA FEEDBACK
+        headers: { 'ngrok-skip-browser-warning': 'true' },
+      })
       if (res.ok) {
         const data = await res.json()
         setConversations(data.conversations || [])
@@ -148,7 +151,10 @@ export function AiChat() {
 
   const handleLoadConversation = async (convId: string) => {
     try {
-      const res = await fetch(`${API_URL}/api/conversations/${convId}/messages`)
+      const res = await fetch(`${API_URL}/api/conversations/${convId}/messages`, {
+        // CAMBIO PARA FEEDBACK
+        headers: { 'ngrok-skip-browser-warning': 'true' },
+      })
       if (!res.ok) return
       const data = await res.json()
       const loaded: Message[] = (data.messages || []).map(
@@ -176,7 +182,11 @@ export function AiChat() {
   const handleDeleteConversation = async (id: string) => {
     if (!confirm("¿Eliminar esta conversación?")) return
     try {
-      await fetch(`${API_URL}/api/conversations/${id}`, { method: "DELETE" })
+      await fetch(`${API_URL}/api/conversations/${id}`, {
+        method: "DELETE",
+        // CAMBIO PARA FEEDBACK
+        headers: { 'ngrok-skip-browser-warning': 'true' },
+      })
       setConversations(prev => prev.filter(c => c.id !== id))
       if (currentConversationId === id) handleNewConversation()
     } catch { /* silent */ }
@@ -188,7 +198,11 @@ export function AiChat() {
     try {
       await fetch(`${API_URL}/api/conversations/${id}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          // CAMBIO PARA FEEDBACK
+          'ngrok-skip-browser-warning': 'true',
+        },
         body: JSON.stringify({ title: trimmed }),
       })
       setConversations(prev => prev.map(c => c.id === id ? { ...c, title: trimmed } : c))
@@ -242,13 +256,19 @@ export function AiChat() {
         if (convId) formData.append("conversation_id", convId)
         response = await fetch(`${API_URL}/api/chat-with-file`, {
           method: "POST",
+          // CAMBIO PARA FEEDBACK
+          headers: { 'ngrok-skip-browser-warning': 'true' },
           body: formData,
           signal: controller.signal,
         })
       } else {
         response = await fetch(`${API_URL}/api/chat`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            // CAMBIO PARA FEEDBACK
+            'ngrok-skip-browser-warning': 'true',
+          },
           body: JSON.stringify({
             message: text,
             community: selectedCommunity,
