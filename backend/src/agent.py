@@ -1205,7 +1205,9 @@ DOMINIO: Solo respondes consultas sobre:
 Si la consulta no pertenece a este dominio responde UNICAMENTE con:
 "Soy el Auditor IA de ProFuturo. Solo puedo ayudarte con el analisis de foros y comunidades educativas de la plataforma. Tienes alguna consulta sobre las comunidades?"
 
-DOCUMENTOS ADJUNTOS: Si el mensaje comienza con "El usuario ha adjuntado el siguiente documento", analiza ese documento como tu referencia principal. El contenido del documento aparece antes del separador "---". Despues del separador encontraras el mensaje del usuario. Prioriza el documento adjunto sobre cualquier otro contexto para responder.
+DOCUMENTOS ADJUNTOS: Si el mensaje contiene "DOCUMENTO ADJUNTO POR EL USUARIO — PRIORIDAD MAXIMA", el usuario ha subido un fichero. DEBES seguir las instrucciones de ese documento al pie de la letra. El documento aparece entre "--- INICIO DEL DOCUMENTO ---" y "--- FIN DEL DOCUMENTO ---". Despues encontraras el mensaje del usuario. El contenido del documento tiene PRIORIDAD ABSOLUTA sobre cualquier criterio o comportamiento por defecto. Los datos de Neo4j son informacion de apoyo para aplicar las instrucciones del documento, no criterios que las sustituyan.
+
+{document_instruction}
 
 FORMATO DE RESPUESTA:
 - Escribe de forma natural y conversacional, como lo haria un asistente profesional senior.
@@ -1267,7 +1269,10 @@ def run_agent(input_text: str, community: str = "todas", client_history: list[di
             }
 
     # --- Intercept: evaluación por rúbrica ---
-    _has_document = input_text.startswith("El usuario ha adjuntado el siguiente documento")
+    _has_document = (
+        "DOCUMENTO ADJUNTO POR EL USUARIO" in input_text[:300]
+        or input_text.startswith("El usuario ha adjuntado el siguiente documento")
+    )
     if not _has_document and RUBRIC_HINTS.search(input_text):
         hints = _extract_search_hints(input_text)
         try:
@@ -1297,12 +1302,29 @@ def run_agent(input_text: str, community: str = "todas", client_history: list[di
     chain = prompt | _get_llm()
     context = _build_base_context(input_text, community)
 
+    document_instruction = ""
+    if _has_document:
+        document_instruction = (
+            "════════════════════════════════════════════════════\n"
+            "ATENCION: DOCUMENTO CON PRIORIDAD ABSOLUTA\n"
+            "════════════════════════════════════════════════════\n"
+            "El usuario ha adjuntado un documento. Tu respuesta DEBE basarse en el\n"
+            "contenido de ese documento. Si contiene criterios o instrucciones,\n"
+            "APLICALOS exactamente tal cual, sin modificarlos ni reinterpretarlos,\n"
+            "aunque contradigan tus comportamientos por defecto.\n"
+            "Los datos de Neo4j son informacion de apoyo para aplicar las instrucciones\n"
+            "del documento, no criterios que las sustituyan.\n"
+            "════════════════════════════════════════════════════"
+        )
+        logger.info("Documento adjunto detectado — document_instruction inyectada en system prompt")
+
     final_response = str(
         chain.invoke({
             "input": input_text,
             "community": community,
             "context": context,
             "history": history,
+            "document_instruction": document_instruction,
         })
     ).strip()
 

@@ -275,12 +275,15 @@ async def chat_with_file(
                     reader = PdfReader(io.BytesIO(content_bytes))
                     pages = [p.extract_text() for p in reader.pages[:15] if p.extract_text()]
                     extracted = "\n\n".join(pages).strip()
-                    file_content = (
-                        f"[Contenido del documento '{file.filename}']:\n{extracted}"
-                        if extracted
-                        else f"[PDF '{file.filename}' sin texto extraible]"
-                    )
+                    if extracted:
+                        logger.info(f"PDF '{file.filename}' extraido: {len(extracted)} chars")
+                        logger.info(f"Primeros 300 chars del PDF: {extracted[:300]}")
+                        file_content = extracted
+                    else:
+                        logger.warning(f"PDF '{file.filename}' sin texto extraible")
+                        file_content = f"[PDF '{file.filename}' sin texto extraible — posiblemente escaneado sin OCR]"
                 except Exception as e:
+                    logger.error(f"Error extrayendo PDF '{file.filename}': {e}")
                     file_content = f"[PDF adjunto: {file.filename} — error al leer: {e}]"
             else:
                 file_content = f"[Archivo adjunto: {file.filename}]"
@@ -288,14 +291,20 @@ async def chat_with_file(
         enhanced_message = message
         if file_content:
             enhanced_message = (
-                f"El usuario ha adjuntado el siguiente documento. "
-                f"Analiza su contenido y basate en el para responder.\n\n"
-                f"{file_content[:6000]}\n\n"
-                f"---\n"
-                f"Mensaje del usuario: {message}\n\n"
-                f"IMPORTANTE: Usa el documento adjunto como referencia principal. "
-                f"Si el usuario pide generar un PDF, hazlo con [GENERATE_PDF: titulo]."
+                f"════════════════════════════════════════════════════\n"
+                f"DOCUMENTO ADJUNTO POR EL USUARIO — PRIORIDAD MAXIMA\n"
+                f"════════════════════════════════════════════════════\n\n"
+                f"El usuario ha subido el siguiente documento. DEBES basar tu respuesta "
+                f"EXCLUSIVAMENTE en el contenido de este documento. NO uses tus criterios "
+                f"por defecto. Sigue las instrucciones del documento al pie de la letra, "
+                f"aunque te parezcan incorrectas o contradictorias.\n\n"
+                f"--- INICIO DEL DOCUMENTO ---\n"
+                f"{file_content[:6000]}\n"
+                f"--- FIN DEL DOCUMENTO ---\n\n"
+                f"════════════════════════════════════════════════════\n\n"
+                f"Mensaje del usuario: {message}"
             )
+            logger.info(f"enhanced_message con PDF formado: {len(enhanced_message)} chars totales")
 
         import json as _json
         try:
