@@ -439,10 +439,10 @@ export function AiChat() {
                     </AvatarFallback>
                   </Avatar>
                   <div
-                    className={`min-w-0 max-w-[85%] rounded-xl px-3.5 py-2.5 ${
+                    className={`min-w-0 max-w-[85%] overflow-hidden rounded-xl px-3.5 py-2.5 ${
                       msg.role === "ai"
-                        ? "overflow-x-auto bg-muted text-foreground"
-                        : "overflow-hidden bg-primary text-primary-foreground"
+                        ? "bg-muted text-foreground"
+                        : "bg-primary text-primary-foreground"
                     } ${msg.loading ? "animate-pulse" : ""}`}
                   >
                     {msg.loading || msg.role === "user" ? (
@@ -453,9 +453,15 @@ export function AiChat() {
                           remarkPlugins={[remarkGfm]}
                           components={{
                             table: ({ node: _n, ...props }) => (
-                              <div className="my-2 overflow-x-auto rounded border border-border/40">
-                                <table className="w-full text-xs" {...props} />
+                              <div className="my-2 w-full overflow-x-auto rounded border border-border/40">
+                                <table className="text-xs" {...props} />
                               </div>
+                            ),
+                            th: ({ node: _n, ...props }) => (
+                              <th className="whitespace-nowrap px-2 py-1" {...props} />
+                            ),
+                            td: ({ node: _n, ...props }) => (
+                              <td className="whitespace-nowrap px-2 py-1" {...props} />
                             ),
                             pre: ({ node: _n, ...props }) => (
                               <pre className="max-w-full overflow-x-auto whitespace-pre-wrap text-xs" {...props} />

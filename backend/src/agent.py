@@ -56,8 +56,15 @@ EXCEL_HINTS = re.compile(
 )
 
 RUBRIC_HINTS = re.compile(
-    r"\b(r[uú]brica|eval[uú]a|evaluaci[oó]n\s+de|calidad\s+de|contribuci[oó]n\s+de|"
-    r"puntua(?:ci[oó]n)?|mejor\s+contribuidor|perfil\s+de\s+autor)\b",
+    r"\b("
+    r"eval[uú]a\s+(las?\s+)?contribuciones?"
+    r"|evaluaci[oó]n\s+pedag[oó]gica"
+    r"|r[uú]brica\s+(?:pedag[oó]gica|de\s+evaluaci[oó]n|de\s+contribuciones?)"
+    r"|calidad\s+de\s+(las?\s+)?contribuciones?"
+    r"|mejor\s+contribuidor"
+    r"|perfil\s+de\s+autor"
+    r"|qui[eé]n\s+contribuye\s+mejor"
+    r")\b",
     re.IGNORECASE,
 )
 
@@ -898,38 +905,59 @@ def _format_rubric_output(raw: str, community: str) -> str:
 
 def evaluate_contributions(community: str, search_hints: list[str] = None) -> str:
     """
-    Evalúa contribuciones recientes por rúbrica pedagógica usando el LLM.
+    Evalúa contribuciones por rúbrica pedagógica. Solo evalúa autores con ≥3 publicaciones sustanciales.
 
     🔍 FUENTE DE DATOS: Neo4j (posts reales) + LLM (evaluación pedagógica)
     ⚠️ NO usa datos visuales ni HTML
 
     CUÁNDO USARME:
-    - Usuario pide: "Evalúa las contribuciones" / "¿Quién contribuye mejor?"
-    - Keywords: rúbrica, evalúa, evaluación, calidad, contribución, puntuación, mejor contribuidor
+    - Usuario pide EXPLÍCITAMENTE: "Evalúa las contribuciones" / "Evaluación pedagógica"
+    - Keywords específicas: evalúa las contribuciones, evaluación pedagógica, rúbrica pedagógica
 
     RETORNA:
-    Tabla markdown con puntuaciones por criterio (pertinencia, aporte pedagógico,
-    argumentación, apoyo emocional) y detalle narrativo por contribuidor.
+    Tabla markdown con puntuaciones por criterio y detalle por contribuidor.
+    Excluye autores con menos de 3 publicaciones sustanciales (>50 caracteres).
     """
     driver = _get_driver()
+    has_comm = bool(community and community != "todas")
+    cp = {"community": community} if has_comm else {}
+    cw = "WHERE c.name = $community" if has_comm else ""
+
     with driver.session() as session:
-        results = []
+        targeted: list[dict] = []
         if search_hints:
             for hint in search_hints[:2]:
-                rows = _run_query(
-                    session, community,
-                    "toLower(a.name) CONTAINS $hint",
-                    {"hint": hint.lower()}, limit=3,
-                )
-                results.extend(rows)
-        if not results:
-            results = _run_query(session, community, "", {}, limit=6)
+                rows = session.run(
+                    f"MATCH (a:Author)-[:WROTE]->(p:Post)-[:IN_DISCUSSION]->(:Discussion)-[:PERTAINS_TO]->(c:Community) "
+                    f"{'WHERE c.name = $community AND' if has_comm else 'WHERE'} toLower(a.name) CONTAINS $hint "
+                    f"WITH a, collect(p) AS posts, count(p) AS total "
+                    f"WHERE total >= 3 "
+                    f"WITH a, [px IN posts WHERE size(px.content) > 50] AS sub, total "
+                    f"WHERE size(sub) >= 1 "
+                    f"RETURN a.name AS author, sub[0].content AS text, total AS post_count "
+                    f"ORDER BY total DESC LIMIT 3",
+                    **{**cp, "hint": hint.lower()}
+                ).data()
+                targeted.extend(rows)
 
-    if not results:
-        return "Sin contribuciones disponibles para evaluar."
+        if not targeted:
+            targeted = session.run(
+                f"MATCH (a:Author)-[:WROTE]->(p:Post)-[:IN_DISCUSSION]->(:Discussion)-[:PERTAINS_TO]->(c:Community) "
+                f"{cw} "
+                f"WITH a, collect(p) AS posts, count(p) AS total "
+                f"WHERE total >= 3 "
+                f"WITH a, [px IN posts WHERE size(px.content) > 50] AS sub, total "
+                f"WHERE size(sub) >= 3 "
+                f"RETURN a.name AS author, sub[0].content AS text, total AS post_count "
+                f"ORDER BY total DESC LIMIT 6",
+                **cp
+            ).data()
+
+    if not targeted:
+        return "Sin contribuciones suficientes para evaluar (se requieren al menos 3 publicaciones por autor)."
 
     by_author: dict[str, str] = {}
-    for r in results:
+    for r in targeted:
         a = str(r.get("author") or "Anonimo")
         if a not in by_author:
             by_author[a] = str(r.get("text") or "")[:300]
@@ -1239,7 +1267,8 @@ def run_agent(input_text: str, community: str = "todas", client_history: list[di
             }
 
     # --- Intercept: evaluación por rúbrica ---
-    if RUBRIC_HINTS.search(input_text):
+    _has_document = input_text.startswith("El usuario ha adjuntado el siguiente documento")
+    if not _has_document and RUBRIC_HINTS.search(input_text):
         hints = _extract_search_hints(input_text)
         try:
             rubric_text = evaluate_contributions(community, hints or None)
