@@ -144,7 +144,7 @@ def _send_alert(subject: str, body: str) -> None:
 
 
 # ── Job 1: Reactivacion de hilos sin respuesta (7-14 dias) ───────────────────
-def reactivation_job() -> None:
+def reactivation_job() -> dict:
     """
     Cada 6 horas. Busca hilos con 0 respuestas y 7-14 dias de antiguedad.
     Genera un mensaje de reactivacion y lo publica en Moodle.
@@ -155,13 +155,19 @@ def reactivation_job() -> None:
     driver     = _get_driver()
     communities = _get_communities()
     published  = 0
+    _sim = os.getenv("MOODLE_SIMULATION_MODE", "true").lower() == "true"
+    results: dict = {"candidates_found": 0, "messages_generated": 0, "simulation": _sim, "sample_message": ""}
 
     for community in communities:
         if published >= MAX_REACTIVATIONS:
             break
         try:
-            cutoff_min = (datetime.now() - timedelta(days=14)).date()
-            cutoff_max = (datetime.now() - timedelta(days=7)).date()
+            # --- SOLO PARA PRUEBA (restaurar tras demo) ---
+            # ORIGINAL: cutoff_min = (datetime.now() - timedelta(days=14)).date()
+            # ORIGINAL: cutoff_max = (datetime.now() - timedelta(days=7)).date()
+            cutoff_min = (datetime.now() - timedelta(days=500)).date()
+            cutoff_max = (datetime.now() - timedelta(days=1)).date()
+            # --- FIN SOLO PARA PRUEBA ---
 
             with driver.session() as session:
                 candidates = session.run("""
@@ -178,6 +184,7 @@ def reactivation_job() -> None:
                     LIMIT 10
                 """, community=community, cutoff_min=cutoff_min, cutoff_max=cutoff_max).data()
 
+            results["candidates_found"] += len(candidates)
             logger.info(
                 "reactivation_job — comunidad='%s' candidatos=%d", community, len(candidates)
             )
@@ -199,6 +206,7 @@ def reactivation_job() -> None:
 
                 prompt   = REACTIVATION_PROMPT.format(community=community, topic=topic)
                 message  = str(llm.invoke(prompt)).strip() + AI_SIGNATURE
+                logger.info("[SIMULACION] Mensaje para '%s': %s", topic[:60], message[:200])
                 subject  = f"Re: {topic[:80]}"
 
                 result = post_to_forum(
@@ -214,6 +222,9 @@ def reactivation_job() -> None:
                             SET d.ai_reactivated = true, d.ai_reactivated_date = date()
                         """, disc_id=str(disc_id_neo))
                     published += 1
+                    results["messages_generated"] += 1
+                    if not results["sample_message"]:
+                        results["sample_message"] = message[:300]
                     logger.info(
                         "Hilo reactivado — comunidad='%s' topic='%s' simulado=%s",
                         community, topic[:60], result.get("simulated"),
@@ -224,10 +235,11 @@ def reactivation_job() -> None:
 
     driver.close()
     logger.info("reactivation_job completado — publicaciones=%d", published)
+    return results
 
 
 # ── Job 2: Bienvenida a nuevos usuarios ──────────────────────────────────────
-def welcome_job() -> None:
+def welcome_job() -> dict:
     """
     Cada 2 horas. Busca usuarios con 1 solo post y menos de 2 dias.
     Genera un mensaje de bienvenida personalizado y lo publica como respuesta.
@@ -238,7 +250,12 @@ def welcome_job() -> None:
     driver     = _get_driver()
     communities = _get_communities()
     published  = 0
-    cutoff     = (datetime.now() - timedelta(days=2)).date()
+    _sim = os.getenv("MOODLE_SIMULATION_MODE", "true").lower() == "true"
+    results: dict = {"candidates_found": 0, "messages_generated": 0, "simulation": _sim, "sample_message": ""}
+    # --- SOLO PARA PRUEBA (restaurar tras demo) ---
+    # ORIGINAL: cutoff = (datetime.now() - timedelta(days=2)).date()
+    cutoff     = (datetime.now() - timedelta(days=500)).date()
+    # --- FIN SOLO PARA PRUEBA ---
 
     for community in communities:
         if published >= MAX_WELCOMES:
@@ -273,6 +290,7 @@ def welcome_job() -> None:
                 f"{r['name']} ({r['posts']} posts)" for r in top_users
             ) if top_users else ""
 
+            results["candidates_found"] += len(new_users)
             logger.info(
                 "welcome_job — comunidad='%s' nuevos=%d", community, len(new_users)
             )
@@ -297,6 +315,7 @@ def welcome_job() -> None:
                     community=community, author=author, topic=topic, context=context
                 )
                 message = str(llm.invoke(prompt)).strip() + AI_SIGNATURE
+                logger.info("[SIMULACION] Bienvenida a '%s': %s", author, message[:200])
                 subject = f"Bienvenida a {author}"
 
                 result = post_to_forum(
@@ -312,6 +331,9 @@ def welcome_job() -> None:
                             SET a.ai_welcomed = true
                         """, author=author)
                     published += 1
+                    results["messages_generated"] += 1
+                    if not results["sample_message"]:
+                        results["sample_message"] = message[:300]
                     logger.info(
                         "Bienvenida enviada — comunidad='%s' autor='%s' simulado=%s",
                         community, author, result.get("simulated"),
@@ -322,10 +344,11 @@ def welcome_job() -> None:
 
     driver.close()
     logger.info("welcome_job completado — publicaciones=%d", published)
+    return results
 
 
 # ── Job 3: Respuesta a menciones directas ────────────────────────────────────
-def mention_response_job() -> None:
+def mention_response_job() -> dict:
     """
     Cada 30 minutos. Busca posts con '@Auditor' en las ultimas 24 horas sin respuesta.
     Genera una respuesta contextual y la publica en el mismo hilo.
@@ -334,7 +357,12 @@ def mention_response_job() -> None:
     logger.info("Inicio mention_response_job")
     llm      = get_profuturo_llm()
     driver   = _get_driver()
-    cutoff   = (datetime.now() - timedelta(hours=24)).date()
+    _sim = os.getenv("MOODLE_SIMULATION_MODE", "true").lower() == "true"
+    results: dict = {"candidates_found": 0, "messages_generated": 0, "simulation": _sim, "sample_message": ""}
+    # --- SOLO PARA PRUEBA (restaurar tras demo) ---
+    # ORIGINAL: cutoff = (datetime.now() - timedelta(hours=24)).date()
+    cutoff   = (datetime.now() - timedelta(days=500)).date()
+    # --- FIN SOLO PARA PRUEBA ---
     published = 0
 
     try:
@@ -352,6 +380,7 @@ def mention_response_job() -> None:
                 LIMIT 30
             """, cutoff=cutoff).data()
 
+        results["candidates_found"] = len(mentions)
         logger.info("mention_response_job — menciones encontradas=%d", len(mentions))
 
         for mention in mentions:
@@ -426,6 +455,9 @@ def mention_response_job() -> None:
                         pid=str(mention.get("post_id", "")),
                     )
                 published += 1
+                results["messages_generated"] += 1
+                if not results["sample_message"]:
+                    results["sample_message"] = message[:300]
                 logger.info(
                     "Mencion respondida — comunidad='%s' autor='%s' simulado=%s",
                     community, author, result.get("simulated"),
@@ -437,6 +469,7 @@ def mention_response_job() -> None:
         driver.close()
 
     logger.info("mention_response_job completado — respuestas=%d", published)
+    return results
 
 
 # ── Job 4: Resumen semanal publicado en el foro (viernes 17:00) ──────────────

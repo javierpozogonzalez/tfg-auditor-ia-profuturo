@@ -625,10 +625,10 @@ async def test_reactivation():
     try:
         from src.autonomous_agent import reactivation_job
         loop = asyncio.get_event_loop()
-        await asyncio.wait_for(
+        job_result = await asyncio.wait_for(
             loop.run_in_executor(_executor, reactivation_job), timeout=120.0
         )
-        return {"success": True, "job": "reactivation_job"}
+        return {"success": True, "job": "reactivation_job", **(job_result or {})}
     except Exception as exc:
         return {"success": False, "error": str(exc)}
 
@@ -638,10 +638,10 @@ async def test_welcome():
     try:
         from src.autonomous_agent import welcome_job
         loop = asyncio.get_event_loop()
-        await asyncio.wait_for(
+        job_result = await asyncio.wait_for(
             loop.run_in_executor(_executor, welcome_job), timeout=120.0
         )
-        return {"success": True, "job": "welcome_job"}
+        return {"success": True, "job": "welcome_job", **(job_result or {})}
     except Exception as exc:
         return {"success": False, "error": str(exc)}
 
@@ -651,10 +651,10 @@ async def test_mention():
     try:
         from src.autonomous_agent import mention_response_job
         loop = asyncio.get_event_loop()
-        await asyncio.wait_for(
+        job_result = await asyncio.wait_for(
             loop.run_in_executor(_executor, mention_response_job), timeout=120.0
         )
-        return {"success": True, "job": "mention_response_job"}
+        return {"success": True, "job": "mention_response_job", **(job_result or {})}
     except Exception as exc:
         return {"success": False, "error": str(exc)}
 
