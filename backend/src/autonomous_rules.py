@@ -5,7 +5,7 @@ Todas las funciones son puras (sin I/O) y devuelven bool.
 El agente las consulta antes de cada publicacion para decidir si actua.
 """
 import re
-from datetime import datetime
+from datetime import datetime, date
 
 # Patron de conflicto grave: el agente NO publica, solo alerta al coordinador.
 _CONFLICT_RE = re.compile(
@@ -36,7 +36,7 @@ _FAQ_RE = re.compile(
 _MENTION_RE = re.compile(r"@[Aa]uditor(\s*(IA|_IA)?)?", re.IGNORECASE)
 
 
-def _parse_date(raw) -> datetime.date | None:
+def _parse_date(raw) -> date | None:
     if raw is None:
         return None
     if hasattr(raw, "year"):
