@@ -287,7 +287,15 @@ async def chat_with_file(
 
         enhanced_message = message
         if file_content:
-            enhanced_message = f"{message}\n\nArchivo adjunto:\n{file_content[:4000]}"
+            enhanced_message = (
+                f"El usuario ha adjuntado el siguiente documento. "
+                f"Analiza su contenido y basate en el para responder.\n\n"
+                f"{file_content[:6000]}\n\n"
+                f"---\n"
+                f"Mensaje del usuario: {message}\n\n"
+                f"IMPORTANTE: Usa el documento adjunto como referencia principal. "
+                f"Si el usuario pide generar un PDF, hazlo con [GENERATE_PDF: titulo]."
+            )
 
         import json as _json
         try:

@@ -423,7 +423,7 @@ export function AiChat() {
       {/* ── Messages ─────────────────────────────────────────────────── */}
       <CardContent className="flex-1 overflow-hidden p-0">
         <ScrollArea className="h-full px-4 py-4">
-          <div className="flex max-w-full flex-col gap-4 overflow-x-hidden">
+          <div className="flex max-w-full flex-col gap-4 min-w-0">
             {messages?.map(msg => (
               <div key={msg.id} className="flex flex-col gap-1">
                 <div className={`flex gap-3 ${msg.role === "user" ? "flex-row-reverse" : "flex-row"}`}>
@@ -439,10 +439,10 @@ export function AiChat() {
                     </AvatarFallback>
                   </Avatar>
                   <div
-                    className={`min-w-0 max-w-[85%] overflow-hidden rounded-xl px-3.5 py-2.5 ${
+                    className={`min-w-0 max-w-[85%] rounded-xl px-3.5 py-2.5 ${
                       msg.role === "ai"
-                        ? "bg-muted text-foreground"
-                        : "bg-primary text-primary-foreground"
+                        ? "overflow-x-auto bg-muted text-foreground"
+                        : "overflow-hidden bg-primary text-primary-foreground"
                     } ${msg.loading ? "animate-pulse" : ""}`}
                   >
                     {msg.loading || msg.role === "user" ? (
