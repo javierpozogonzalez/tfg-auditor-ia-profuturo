@@ -506,28 +506,30 @@ export function AiChat() {
                     ) : msg.loading || msg.role === "user" ? (
                       <p className="break-words text-sm leading-relaxed">{msg.content}</p>
                     ) : (
-                      <div className="prose prose-sm w-full max-w-none break-words text-foreground prose-headings:text-foreground prose-strong:text-foreground prose-p:my-1 prose-p:leading-normal prose-ul:my-1 prose-ol:my-1 prose-li:my-0 prose-headings:mb-1 prose-headings:mt-3 prose-hr:my-3 prose-hr:border-foreground/30 prose-code:break-all prose-pre:text-xs prose-table:text-xs">
-                        <ReactMarkdown
-                          remarkPlugins={[remarkGfm]}
-                          components={{
-                            table: ({ node: _n, ...props }) => (
-                              <div className="my-2 w-full overflow-x-auto rounded border border-border/40">
-                                <table className="text-xs" {...props} />
-                              </div>
-                            ),
-                            th: ({ node: _n, ...props }) => (
-                              <th className="whitespace-nowrap px-2 py-1" {...props} />
-                            ),
-                            td: ({ node: _n, ...props }) => (
-                              <td className="whitespace-nowrap px-2 py-1" {...props} />
-                            ),
-                            pre: ({ node: _n, ...props }) => (
-                              <pre className="max-w-full overflow-x-auto whitespace-pre-wrap text-xs" {...props} />
-                            ),
-                          }}
-                        >
-                          {msg.content}
-                        </ReactMarkdown>
+                      <div className="grid min-w-0">
+                        <div className="prose prose-sm min-w-0 max-w-none break-words text-foreground prose-headings:text-foreground prose-strong:text-foreground prose-p:my-1 prose-p:leading-normal prose-ul:my-1 prose-ol:my-1 prose-li:my-0 prose-headings:mb-1 prose-headings:mt-3 prose-hr:my-3 prose-hr:border-foreground/30 prose-code:break-all prose-pre:text-xs prose-table:text-[11px]">
+                          <ReactMarkdown
+                            remarkPlugins={[remarkGfm]}
+                            components={{
+                              table: ({ node: _n, ...props }) => (
+                                <div className="my-2 w-full overflow-x-auto rounded border border-border/40">
+                                  <table className="text-[11px]" {...props} />
+                                </div>
+                              ),
+                              th: ({ node: _n, ...props }) => (
+                                <th className="whitespace-nowrap px-1.5 py-1 text-[11px]" {...props} />
+                              ),
+                              td: ({ node: _n, ...props }) => (
+                                <td className="px-1.5 py-0.5 text-[11px]" {...props} />
+                              ),
+                              pre: ({ node: _n, ...props }) => (
+                                <pre className="max-w-full overflow-x-auto whitespace-pre-wrap text-xs" {...props} />
+                              ),
+                            }}
+                          >
+                            {msg.content}
+                          </ReactMarkdown>
+                        </div>
                       </div>
                     )}
                   </div>
