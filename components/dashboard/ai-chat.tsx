@@ -16,7 +16,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import {
   Bot, Send, FileDown, Sparkles, Paperclip, X, Table2,
-  Clock, Plus, MessageSquare, Pencil, Trash2, Check,
+  Clock, Plus, MessageSquare, Pencil, Trash2, Check, Square,
 } from "lucide-react"
 import { useCommunity } from "@/lib/community-context"
 
@@ -104,9 +104,13 @@ export function AiChat() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingTitle, setEditingTitle] = useState("")
 
+  const [editingMsgId, setEditingMsgId] = useState<number | null>(null)
+  const [editingMsgContent, setEditingMsgContent] = useState("")
+
   const { selectedCommunity } = useCommunity()
   const bottomRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const abortControllerRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
     if (bottomRef.current && messages.length > 0) {
@@ -227,6 +231,7 @@ export function AiChat() {
       .map(m => ({ role: m.role, content: m.content }))
 
     const controller = new AbortController()
+    abortControllerRef.current = controller
     const timeout = setTimeout(() => controller.abort(), CHAT_TIMEOUT_MS)
 
     try {
@@ -279,16 +284,37 @@ export function AiChat() {
       if (pdf) triggerPDFDownload(pdf)
       if (excel) triggerExcelDownload(excel)
     } catch (error: unknown) {
-      const isAbort = error instanceof Error && error.name === "AbortError"
-      appendAIMessage(
-        isAbort
-          ? "La consulta superó el tiempo máximo (600s). Reintenta."
-          : `Error al conectar con el servidor en ${API_URL}. Asegúrate de que el backend esté en ejecución.`
-      )
+      if (error instanceof Error && error.name === "AbortError") {
+        const timedOut = !abortControllerRef.current || abortControllerRef.current.signal.aborted
+        appendAIMessage(timedOut ? "Consulta cancelada." : "La consulta superó el tiempo máximo (600s). Reintenta.")
+      } else {
+        appendAIMessage(`Error al conectar con el servidor en ${API_URL}. Asegúrate de que el backend esté en ejecución.`)
+      }
     } finally {
       clearTimeout(timeout)
+      abortControllerRef.current = null
       setIsLoading(false)
     }
+  }
+
+  const handleStop = () => {
+    abortControllerRef.current?.abort()
+  }
+
+  const handleEditMessage = (msg: Message) => {
+    if (isLoading) return
+    setEditingMsgId(msg.id)
+    setEditingMsgContent(msg.content)
+  }
+
+  const handleConfirmEdit = (msgId: number) => {
+    const newContent = editingMsgContent.trim()
+    if (!newContent) return
+    const idx = messages.findIndex(m => m.id === msgId)
+    if (idx === -1) return
+    setMessages(messages.slice(0, idx))
+    setEditingMsgId(null)
+    handleSendMessage(newContent)
   }
 
   return (
@@ -443,9 +469,41 @@ export function AiChat() {
                       msg.role === "ai"
                         ? "bg-muted text-foreground"
                         : "bg-primary text-primary-foreground"
-                    } ${msg.loading ? "animate-pulse" : ""}`}
+                    } ${msg.loading ? "animate-pulse" : ""} ${
+                      msg.role === "user" && !isLoading ? "cursor-pointer hover:opacity-90" : ""
+                    }`}
+                    onClick={() => msg.role === "user" && !msg.loading && handleEditMessage(msg)}
+                    title={msg.role === "user" && !isLoading ? "Clic para editar" : undefined}
                   >
-                    {msg.loading || msg.role === "user" ? (
+                    {editingMsgId === msg.id ? (
+                      <div className="flex flex-col gap-1.5" onClick={e => e.stopPropagation()}>
+                        <textarea
+                          className="w-full resize-none rounded bg-primary-foreground/10 px-2 py-1 text-sm text-primary-foreground placeholder:text-primary-foreground/50 focus:outline-none"
+                          rows={3}
+                          value={editingMsgContent}
+                          onChange={e => setEditingMsgContent(e.target.value)}
+                          onKeyDown={e => {
+                            if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleConfirmEdit(msg.id) }
+                            if (e.key === "Escape") setEditingMsgId(null)
+                          }}
+                          autoFocus
+                        />
+                        <div className="flex justify-end gap-1">
+                          <button
+                            className="rounded px-2 py-0.5 text-xs text-primary-foreground/70 hover:text-primary-foreground"
+                            onClick={() => setEditingMsgId(null)}
+                          >
+                            Cancelar
+                          </button>
+                          <button
+                            className="rounded bg-primary-foreground/20 px-2 py-0.5 text-xs text-primary-foreground hover:bg-primary-foreground/30"
+                            onClick={() => handleConfirmEdit(msg.id)}
+                          >
+                            Enviar
+                          </button>
+                        </div>
+                      </div>
+                    ) : msg.loading || msg.role === "user" ? (
                       <p className="break-words text-sm leading-relaxed">{msg.content}</p>
                     ) : (
                       <div className="prose prose-sm w-full max-w-none break-words text-foreground prose-headings:text-foreground prose-strong:text-foreground prose-p:my-1 prose-p:leading-normal prose-ul:my-1 prose-ol:my-1 prose-li:my-0 prose-headings:mb-1 prose-headings:mt-3 prose-hr:my-3 prose-hr:border-foreground/30 prose-code:break-all prose-pre:text-xs prose-table:text-xs">
@@ -578,14 +636,26 @@ export function AiChat() {
               disabled={isLoading}
               className="flex-1 border-border bg-secondary text-foreground placeholder:text-muted-foreground"
             />
-            <Button
-              size="icon"
-              className="shrink-0 bg-primary text-primary-foreground hover:bg-primary/90"
-              onClick={() => handleSendMessage()}
-              disabled={isLoading || !inputValue.trim()}
-            >
-              <Send className="size-4" />
-            </Button>
+            {isLoading ? (
+              <Button
+                size="icon"
+                variant="outline"
+                className="shrink-0 border-destructive text-destructive hover:bg-destructive hover:text-destructive-foreground"
+                onClick={handleStop}
+                title="Detener"
+              >
+                <Square className="size-4 fill-current" />
+              </Button>
+            ) : (
+              <Button
+                size="icon"
+                className="shrink-0 bg-primary text-primary-foreground hover:bg-primary/90"
+                onClick={() => handleSendMessage()}
+                disabled={!inputValue.trim()}
+              >
+                <Send className="size-4" />
+              </Button>
+            )}
           </div>
         </div>
       </CardFooter>
