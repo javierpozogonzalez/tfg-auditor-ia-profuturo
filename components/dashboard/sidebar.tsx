@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { ShieldCheck, FileBarChart, Trophy } from "lucide-react"
+import { ShieldCheck, FileBarChart, Trophy, LogOut } from "lucide-react"
 import {
   Select,
   SelectContent,
@@ -12,6 +12,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { useCommunity } from "@/lib/community-context"
+import { useAuth } from "@/lib/auth-context"
 
 // const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 // CAMBIO PARA FEEDBACK
@@ -19,6 +20,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? ""
 
 export function DashboardSidebar() {
   const { selectedCommunity, setSelectedCommunity } = useCommunity()
+  const { logout } = useAuth()
   const [communities, setCommunities] = useState<string[]>([])
 
   useEffect(() => {
@@ -90,6 +92,17 @@ export function DashboardSidebar() {
       </div>
 
       <Separator className="bg-sidebar-border" />
+
+      <div className="px-5 py-4">
+        <Button
+          variant="ghost"
+          className="w-full justify-start gap-3 text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+          onClick={logout}
+        >
+          <LogOut className="size-4" />
+          <span className="text-sm">Cerrar sesion</span>
+        </Button>
+      </div>
     </aside>
   )
 }

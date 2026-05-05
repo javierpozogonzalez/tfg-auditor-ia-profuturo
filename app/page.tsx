@@ -4,8 +4,14 @@ import { DashboardSidebar } from "@/components/dashboard/sidebar"
 import { DataPanel } from "@/components/dashboard/data-panel"
 import { AiChat } from "@/components/dashboard/ai-chat"
 import { CommunityProvider } from "@/lib/community-context"
+import { AuthProvider, useAuth } from "@/lib/auth-context"
+import { LoginPage } from "@/components/login-page"
 
-export default function DashboardPage() {
+function AppContent() {
+  const { isAuthenticated } = useAuth()
+
+  if (!isAuthenticated) return <LoginPage />
+
   return (
     <CommunityProvider>
       <div className="flex h-screen w-full overflow-hidden bg-background">
@@ -22,5 +28,13 @@ export default function DashboardPage() {
         </main>
       </div>
     </CommunityProvider>
+  )
+}
+
+export default function DashboardPage() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
   )
 }
