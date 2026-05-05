@@ -152,7 +152,7 @@ def get_last_days_messages(days: int, community: str = None):
                 query = """
                 MATCH (a:Author)-[:WROTE]->(p:Post)-[:IN_DISCUSSION]->(d:Discussion)
                       -[:PERTAINS_TO]->(c:Community)
-                WHERE c.name = $community AND p.date >= $cutoff
+                WHERE c.name = $community AND date(p.date) >= $cutoff
                 RETURN a.name AS author, p.content AS text,
                        d.topic AS topic, c.name AS community, p.date AS date
                 ORDER BY p.date DESC
@@ -162,7 +162,7 @@ def get_last_days_messages(days: int, community: str = None):
                 query = """
                 MATCH (a:Author)-[:WROTE]->(p:Post)-[:IN_DISCUSSION]->(d:Discussion)
                       -[:PERTAINS_TO]->(c:Community)
-                WHERE p.date >= $cutoff
+                WHERE date(p.date) >= $cutoff
                 RETURN a.name AS author, p.content AS text,
                        d.topic AS topic, c.name AS community, p.date AS date
                 ORDER BY p.date DESC
@@ -219,7 +219,7 @@ def get_unanswered_discussions(days_threshold: int = UNANSWERED_DAYS, community:
                 MATCH (p:Post)-[:IN_DISCUSSION]->(d:Discussion)-[:PERTAINS_TO]->(c:Community)
                 WHERE c.name = $community
                 WITH d, c, max(p.date) AS last_activity
-                WHERE last_activity <= $cutoff
+                WHERE date(last_activity) <= $cutoff
                 RETURN d.topic AS topic, toString(last_activity) AS last_activity, c.name AS community
                 ORDER BY last_activity ASC LIMIT 15
                 """
@@ -228,7 +228,7 @@ def get_unanswered_discussions(days_threshold: int = UNANSWERED_DAYS, community:
                 query = """
                 MATCH (p:Post)-[:IN_DISCUSSION]->(d:Discussion)-[:PERTAINS_TO]->(c:Community)
                 WITH d, c, max(p.date) AS last_activity
-                WHERE last_activity <= $cutoff
+                WHERE date(last_activity) <= $cutoff
                 RETURN d.topic AS topic, toString(last_activity) AS last_activity, c.name AS community
                 ORDER BY last_activity ASC LIMIT 15
                 """
@@ -249,9 +249,9 @@ def get_disconnection_risk(community: str = None) -> dict:
             if community and community != "todas":
                 at_risk = [r.data() for r in session.run("""
                     MATCH (a:Author)-[:WROTE]->(p:Post)-[:IN_DISCUSSION]->(:Discussion)-[:PERTAINS_TO]->(c:Community)
-                    WHERE c.name = $community AND p.date >= $cutoff_active
+                    WHERE c.name = $community AND date(p.date) >= $cutoff_active
                     WITH a, max(p.date) AS last_post, count(p) AS total_posts
-                    WHERE last_post <= $cutoff_idle AND total_posts >= 3
+                    WHERE date(last_post) <= $cutoff_idle AND total_posts >= 3
                     RETURN a.name AS author, toString(last_post) AS last_post, total_posts
                     ORDER BY last_post ASC LIMIT 10
                 """, community=community, cutoff_active=cutoff_active, cutoff_idle=cutoff_idle)]
@@ -266,9 +266,9 @@ def get_disconnection_risk(community: str = None) -> dict:
             else:
                 at_risk = [r.data() for r in session.run("""
                     MATCH (a:Author)-[:WROTE]->(p:Post)-[:IN_DISCUSSION]->(:Discussion)-[:PERTAINS_TO]->(:Community)
-                    WHERE p.date >= $cutoff_active
+                    WHERE date(p.date) >= $cutoff_active
                     WITH a, max(p.date) AS last_post, count(p) AS total_posts
-                    WHERE last_post <= $cutoff_idle AND total_posts >= 3
+                    WHERE date(last_post) <= $cutoff_idle AND total_posts >= 3
                     RETURN a.name AS author, toString(last_post) AS last_post, total_posts
                     ORDER BY last_post ASC LIMIT 10
                 """, cutoff_active=cutoff_active, cutoff_idle=cutoff_idle)]

@@ -176,8 +176,8 @@ def reactivation_job() -> dict:
                     OPTIONAL MATCH (p:Post)-[:IN_DISCUSSION]->(d)
                     WITH d, count(p) AS total_posts, max(p.date) AS last_activity
                     WHERE total_posts = 1
-                      AND last_activity >= $cutoff_min
-                      AND last_activity <= $cutoff_max
+                      AND date(last_activity) >= $cutoff_min
+                      AND date(last_activity) <= $cutoff_max
                       AND NOT EXISTS { MATCH (d) WHERE d.ai_reactivated = true }
                     RETURN d.id AS discussion_id, d.topic AS topic,
                            toString(last_activity) AS last_activity
@@ -271,7 +271,7 @@ def welcome_job() -> dict:
                          collect(p.id)[0] AS first_post_id,
                          collect(d.id)[0] AS disc_id
                     WHERE total_posts = 1
-                      AND first_post_date >= $cutoff
+                      AND date(first_post_date) >= $cutoff
                       AND NOT EXISTS { MATCH (a) WHERE a.ai_welcomed = true }
                     RETURN a.name AS author, toString(first_post_date) AS first_post_date,
                            first_topic AS topic, first_post_id AS post_id, disc_id
@@ -371,7 +371,7 @@ def mention_response_job() -> dict:
                 MATCH (a:Author)-[:WROTE]->(p:Post)-[:IN_DISCUSSION]->(d:Discussion)
                       -[:PERTAINS_TO]->(c:Community)
                 WHERE (p.content CONTAINS '@Auditor' OR p.content CONTAINS '@auditor')
-                  AND p.date >= $cutoff
+                  AND date(p.date) >= $cutoff
                   AND NOT EXISTS { MATCH (p) WHERE p.ai_answered = true }
                 RETURN p.id AS post_id, p.content AS content,
                        d.topic AS topic, d.id AS disc_id,
@@ -491,7 +491,7 @@ def weekly_digest_post_job() -> None:
                 posts = session.run("""
                     MATCH (a:Author)-[:WROTE]->(p:Post)-[:IN_DISCUSSION]->(d:Discussion)
                           -[:PERTAINS_TO]->(c:Community)
-                    WHERE c.name = $community AND p.date >= $cutoff
+                    WHERE c.name = $community AND date(p.date) >= $cutoff
                     RETURN a.name AS author, d.topic AS topic, count(p) AS posts
                     ORDER BY posts DESC
                 """, community=community, cutoff=cutoff).data()
@@ -563,7 +563,7 @@ def recognition_job() -> None:
                 top = session.run("""
                     MATCH (a:Author)-[:WROTE]->(p:Post)-[:IN_DISCUSSION]->(d:Discussion)
                           -[:PERTAINS_TO]->(c:Community)
-                    WHERE c.name = $community AND p.date >= $cutoff
+                    WHERE c.name = $community AND date(p.date) >= $cutoff
                     RETURN a.name AS author, count(p) AS post_count,
                            collect(DISTINCT d.topic)[..4] AS topics
                     ORDER BY post_count DESC LIMIT 1
@@ -629,7 +629,7 @@ def bug_detection_job() -> None:
                 recent_posts = session.run("""
                     MATCH (a:Author)-[:WROTE]->(p:Post)-[:IN_DISCUSSION]->(d:Discussion)
                           -[:PERTAINS_TO]->(c:Community)
-                    WHERE c.name = $community AND p.date >= $cutoff
+                    WHERE c.name = $community AND date(p.date) >= $cutoff
                     RETURN a.name AS author, p.content AS content, d.topic AS topic
                 """, community=community, cutoff=cutoff).data()
 

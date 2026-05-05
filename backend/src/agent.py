@@ -335,13 +335,13 @@ def get_community_kpis(community: str = "todas") -> str:
 
             active_30 = (session.run("""
                 MATCH (a:Author)-[:WROTE]->(p:Post)-[:IN_DISCUSSION]->(:Discussion)-[:PERTAINS_TO]->(c:Community)
-                WHERE c.name = $community AND p.date >= $cutoff
+                WHERE c.name = $community AND date(p.date) >= $cutoff
                 RETURN count(DISTINCT a) AS n
             """, community=community, cutoff=cutoff_30).single() or {"n": 0})["n"]
 
             active_prev = (session.run("""
                 MATCH (a:Author)-[:WROTE]->(p:Post)-[:IN_DISCUSSION]->(:Discussion)-[:PERTAINS_TO]->(c:Community)
-                WHERE c.name = $community AND p.date >= $cutoff_60 AND p.date < $cutoff_30
+                WHERE c.name = $community AND date(p.date) >= $cutoff_60 AND date(p.date) < $cutoff_30
                 RETURN count(DISTINCT a) AS n
             """, community=community, cutoff_60=cutoff_60, cutoff_30=cutoff_30).single() or {"n": 0})["n"]
 
@@ -370,12 +370,12 @@ def get_community_kpis(community: str = "todas") -> str:
 
             active_30 = (session.run("""
                 MATCH (a:Author)-[:WROTE]->(p:Post)-[:IN_DISCUSSION]->(:Discussion)-[:PERTAINS_TO]->(:Community)
-                WHERE p.date >= $cutoff RETURN count(DISTINCT a) AS n
+                WHERE date(p.date) >= $cutoff RETURN count(DISTINCT a) AS n
             """, cutoff=cutoff_30).single() or {"n": 0})["n"]
 
             active_prev = (session.run("""
                 MATCH (a:Author)-[:WROTE]->(p:Post)-[:IN_DISCUSSION]->(:Discussion)-[:PERTAINS_TO]->(:Community)
-                WHERE p.date >= $cutoff_60 AND p.date < $cutoff_30
+                WHERE date(p.date) >= $cutoff_60 AND date(p.date) < $cutoff_30
                 RETURN count(DISTINCT a) AS n
             """, cutoff_60=cutoff_60, cutoff_30=cutoff_30).single() or {"n": 0})["n"]
 
@@ -459,7 +459,7 @@ def generate_climate_audit(community: str) -> str:
 
         active_30 = (session.run(
             f"MATCH (a:Author)-[:WROTE]->(p:Post)-[:IN_DISCUSSION]->(:Discussion)-[:PERTAINS_TO]->(c:Community) "
-            f"{cwa} p.date >= $cutoff RETURN count(DISTINCT a) AS n",
+            f"{cwa} date(p.date) >= $cutoff RETURN count(DISTINCT a) AS n",
             **{**cp, "cutoff": cutoff_30}
         ).single() or {"n": 0})["n"]
 
@@ -663,7 +663,7 @@ def analyze_engagement(community: str) -> str:
 
         recent_posts = (session.run(
             f"MATCH (:Author)-[:WROTE]->(p:Post)-[:IN_DISCUSSION]->(:Discussion)-[:PERTAINS_TO]->(c:Community) "
-            f"{cwa} p.date >= $cutoff RETURN count(p) AS n",
+            f"{cwa} date(p.date) >= $cutoff RETURN count(p) AS n",
             **{**cp, "cutoff": cutoff_30}
         ).single() or {"n": 0})["n"]
 
@@ -724,14 +724,14 @@ def get_trending_topics(community: str, days: int = 7) -> str:
     with driver.session() as session:
         recent = session.run(
             f"MATCH (:Author)-[:WROTE]->(p:Post)-[:IN_DISCUSSION]->(d:Discussion)-[:PERTAINS_TO]->(c:Community) "
-            f"{cwa} p.date >= $cutoff "
+            f"{cwa} date(p.date) >= $cutoff "
             f"RETURN d.topic AS topic, count(p) AS posts ORDER BY posts DESC LIMIT 20",
             **{**cp, "cutoff": cutoff_recent}
         ).data()
 
         prev = session.run(
             f"MATCH (:Author)-[:WROTE]->(p:Post)-[:IN_DISCUSSION]->(d:Discussion)-[:PERTAINS_TO]->(c:Community) "
-            f"{cwa} p.date >= $cutoff_prev AND p.date < $cutoff_recent "
+            f"{cwa} date(p.date) >= $cutoff_prev AND date(p.date) < $cutoff_recent "
             f"RETURN d.topic AS topic, count(p) AS posts",
             **{**cp, "cutoff_prev": cutoff_prev, "cutoff_recent": cutoff_recent}
         ).data()
@@ -998,12 +998,12 @@ def build_excel_data(community: str) -> dict:
 
         active_30 = (session.run(
             f"MATCH (a:Author)-[:WROTE]->(p:Post)-[:IN_DISCUSSION]->(:Discussion)-[:PERTAINS_TO]->(c:Community) "
-            f"{cwa} p.date >= $c RETURN count(DISTINCT a) AS n", **{**cp, "c": cutoff_30}
+            f"{cwa} date(p.date) >= $c RETURN count(DISTINCT a) AS n", **{**cp, "c": cutoff_30}
         ).single() or {"n": 0})["n"]
 
         active_prev = (session.run(
             f"MATCH (a:Author)-[:WROTE]->(p:Post)-[:IN_DISCUSSION]->(:Discussion)-[:PERTAINS_TO]->(c:Community) "
-            f"{cwa} p.date >= $c60 AND p.date < $c30 RETURN count(DISTINCT a) AS n",
+            f"{cwa} date(p.date) >= $c60 AND date(p.date) < $c30 RETURN count(DISTINCT a) AS n",
             **{**cp, "c60": cutoff_60, "c30": cutoff_30}
         ).single() or {"n": 0})["n"]
 
@@ -1021,7 +1021,7 @@ def build_excel_data(community: str) -> dict:
 
         topics_30d_rows = session.run(
             f"MATCH (:Author)-[:WROTE]->(p:Post)-[:IN_DISCUSSION]->(d:Discussion)-[:PERTAINS_TO]->(c:Community) "
-            f"{cwa} p.date >= $c RETURN d.topic AS topic, count(*) AS posts_30d ORDER BY posts_30d DESC LIMIT 15",
+            f"{cwa} date(p.date) >= $c RETURN d.topic AS topic, count(*) AS posts_30d ORDER BY posts_30d DESC LIMIT 15",
             **{**cp, "c": cutoff_30}
         ).data()
         topics_30d = {r["topic"]: r["posts_30d"] for r in topics_30d_rows}
