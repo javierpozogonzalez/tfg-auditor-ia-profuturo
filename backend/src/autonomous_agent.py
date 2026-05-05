@@ -193,42 +193,43 @@ def reactivation_job() -> dict:
                 if published >= MAX_REACTIVATIONS:
                     break
 
-                thread_data = {
-                    "reply_count":    0,
-                    "last_activity":  thread.get("last_activity"),
-                    "ai_reactivated": False,
-                }
-                if not can_reactivate_thread(thread_data):
-                    continue
+                if not _sim:
+                    thread_data = {
+                        "reply_count":    0,
+                        "last_activity":  thread.get("last_activity"),
+                        "ai_reactivated": False,
+                    }
+                    if not can_reactivate_thread(thread_data):
+                        continue
 
                 topic       = str(thread.get("topic") or "sin tema")
                 disc_id_neo = thread.get("discussion_id") or 0
 
-                prompt   = REACTIVATION_PROMPT.format(community=community, topic=topic)
-                message  = str(llm.invoke(prompt)).strip() + AI_SIGNATURE
+                prompt  = REACTIVATION_PROMPT.format(community=community, topic=topic)
+                message = str(llm.invoke(prompt)).strip() + AI_SIGNATURE
+                results["messages_generated"] += 1
+                if not results["sample_message"]:
+                    results["sample_message"] = message[:300]
                 logger.info("[SIMULACION] Mensaje para '%s': %s", topic[:60], message[:200])
-                subject  = f"Re: {topic[:80]}"
+                published += 1
 
-                result = post_to_forum(
-                    discussion_id=int(disc_id_neo) if disc_id_neo else MOODLE_DEFAULT_FORUM_ID,
-                    subject=subject,
-                    message=message,
-                )
-
-                if result["success"]:
-                    with driver.session() as session:
-                        session.run("""
-                            MATCH (d:Discussion {id: $disc_id})
-                            SET d.ai_reactivated = true, d.ai_reactivated_date = date()
-                        """, disc_id=str(disc_id_neo))
-                    published += 1
-                    results["messages_generated"] += 1
-                    if not results["sample_message"]:
-                        results["sample_message"] = message[:300]
-                    logger.info(
-                        "Hilo reactivado — comunidad='%s' topic='%s' simulado=%s",
-                        community, topic[:60], result.get("simulated"),
+                if not _sim:
+                    subject = f"Re: {topic[:80]}"
+                    result  = post_to_forum(
+                        discussion_id=int(disc_id_neo) if disc_id_neo else MOODLE_DEFAULT_FORUM_ID,
+                        subject=subject,
+                        message=message,
                     )
+                    if result["success"]:
+                        with driver.session() as session:
+                            session.run("""
+                                MATCH (d:Discussion {id: $disc_id})
+                                SET d.ai_reactivated = true, d.ai_reactivated_date = date()
+                            """, disc_id=str(disc_id_neo))
+                        logger.info(
+                            "Hilo reactivado — comunidad='%s' topic='%s'",
+                            community, topic[:60],
+                        )
 
         except Exception as exc:
             logger.error("Error en reactivation_job para '%s': %s", community, exc)
@@ -299,13 +300,14 @@ def welcome_job() -> dict:
                 if published >= MAX_WELCOMES:
                     break
 
-                user_data = {
-                    "total_posts":     1,
-                    "ai_welcomed":     False,
-                    "first_post_date": user.get("first_post_date"),
-                }
-                if not should_welcome_user(user_data):
-                    continue
+                if not _sim:
+                    user_data = {
+                        "total_posts":     1,
+                        "ai_welcomed":     False,
+                        "first_post_date": user.get("first_post_date"),
+                    }
+                    if not should_welcome_user(user_data):
+                        continue
 
                 author  = str(user.get("author") or "nuevo miembro")
                 topic   = str(user.get("topic")  or "sin tema")
@@ -315,29 +317,29 @@ def welcome_job() -> dict:
                     community=community, author=author, topic=topic, context=context
                 )
                 message = str(llm.invoke(prompt)).strip() + AI_SIGNATURE
+                results["messages_generated"] += 1
+                if not results["sample_message"]:
+                    results["sample_message"] = message[:300]
                 logger.info("[SIMULACION] Bienvenida a '%s': %s", author, message[:200])
-                subject = f"Bienvenida a {author}"
+                published += 1
 
-                result = post_to_forum(
-                    discussion_id=int(disc_id) if disc_id else MOODLE_DEFAULT_FORUM_ID,
-                    subject=subject,
-                    message=message,
-                )
-
-                if result["success"]:
-                    with driver.session() as session:
-                        session.run("""
-                            MATCH (a:Author {name: $author})
-                            SET a.ai_welcomed = true
-                        """, author=author)
-                    published += 1
-                    results["messages_generated"] += 1
-                    if not results["sample_message"]:
-                        results["sample_message"] = message[:300]
-                    logger.info(
-                        "Bienvenida enviada — comunidad='%s' autor='%s' simulado=%s",
-                        community, author, result.get("simulated"),
+                if not _sim:
+                    subject = f"Bienvenida a {author}"
+                    result  = post_to_forum(
+                        discussion_id=int(disc_id) if disc_id else MOODLE_DEFAULT_FORUM_ID,
+                        subject=subject,
+                        message=message,
                     )
+                    if result["success"]:
+                        with driver.session() as session:
+                            session.run("""
+                                MATCH (a:Author {name: $author})
+                                SET a.ai_welcomed = true
+                            """, author=author)
+                        logger.info(
+                            "Bienvenida enviada — comunidad='%s' autor='%s'",
+                            community, author,
+                        )
 
         except Exception as exc:
             logger.error("Error en welcome_job para '%s': %s", community, exc)
@@ -387,14 +389,15 @@ def mention_response_job() -> dict:
             if published >= MAX_MENTIONS:
                 break
 
-            post_data = {
-                "content":     mention.get("content", ""),
-                "ai_answered": False,
-            }
-            if not can_respond_to_mention(post_data):
-                continue
+            if not _sim:
+                post_data = {
+                    "content":     mention.get("content", ""),
+                    "ai_answered": False,
+                }
+                if not can_respond_to_mention(post_data):
+                    continue
 
-            # Escalar si el contenido requiere moderacion humana
+            # Escalado de moderacion: aplica siempre
             if needs_moderation_alert({"content": mention.get("content", ""), "topic": mention.get("topic", "")}):
                 _send_alert(
                     subject=f"Alerta de moderacion — {mention.get('community')}",
@@ -410,11 +413,12 @@ def mention_response_job() -> dict:
                     "Mencion escalada a coordinador — autor='%s' comunidad='%s'",
                     mention.get("author"), mention.get("community"),
                 )
-                with driver.session() as session:
-                    session.run(
-                        "MATCH (p:Post {id: $pid}) SET p.ai_answered = true",
-                        pid=str(mention.get("post_id", "")),
-                    )
+                if not _sim:
+                    with driver.session() as session:
+                        session.run(
+                            "MATCH (p:Post {id: $pid}) SET p.ai_answered = true",
+                            pid=str(mention.get("post_id", "")),
+                        )
                 continue
 
             question = re.sub(r"@[Aa]uditor(\s*(IA|_IA)?)?", "", mention["content"]).strip()
@@ -440,28 +444,29 @@ def mention_response_job() -> dict:
                 community=community, author=author, question=question, context=context
             )
             message = str(llm.invoke(prompt)).strip() + AI_SIGNATURE
-            subject = f"Re: {topic[:80]}"
+            results["messages_generated"] += 1
+            if not results["sample_message"]:
+                results["sample_message"] = message[:300]
+            logger.info("[SIMULACION] Respuesta a '%s': %s", author, message[:200])
+            published += 1
 
-            result = post_to_forum(
-                discussion_id=int(disc_id) if disc_id else MOODLE_DEFAULT_FORUM_ID,
-                subject=subject,
-                message=message,
-            )
-
-            if result["success"]:
-                with driver.session() as session:
-                    session.run(
-                        "MATCH (p:Post {id: $pid}) SET p.ai_answered = true",
-                        pid=str(mention.get("post_id", "")),
-                    )
-                published += 1
-                results["messages_generated"] += 1
-                if not results["sample_message"]:
-                    results["sample_message"] = message[:300]
-                logger.info(
-                    "Mencion respondida — comunidad='%s' autor='%s' simulado=%s",
-                    community, author, result.get("simulated"),
+            if not _sim:
+                subject = f"Re: {topic[:80]}"
+                result  = post_to_forum(
+                    discussion_id=int(disc_id) if disc_id else MOODLE_DEFAULT_FORUM_ID,
+                    subject=subject,
+                    message=message,
                 )
+                if result["success"]:
+                    with driver.session() as session:
+                        session.run(
+                            "MATCH (p:Post {id: $pid}) SET p.ai_answered = true",
+                            pid=str(mention.get("post_id", "")),
+                        )
+                    logger.info(
+                        "Mencion respondida — comunidad='%s' autor='%s'",
+                        community, author,
+                    )
 
     except Exception as exc:
         logger.error("Error en mention_response_job: %s", exc)
