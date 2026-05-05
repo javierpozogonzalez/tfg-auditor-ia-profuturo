@@ -296,9 +296,15 @@ def welcome_job() -> dict:
                 "welcome_job — comunidad='%s' nuevos=%d", community, len(new_users)
             )
 
-            for user in new_users:
+            for user in new_users[:5]:
                 if published >= MAX_WELCOMES:
                     break
+
+                author  = str(user.get("author") or "nuevo miembro")
+                topic   = str(user.get("topic")  or "sin tema")
+                disc_id = user.get("disc_id") or MOODLE_DEFAULT_FORUM_ID
+
+                logger.info("welcome_job — generando bienvenida para '%s'", author)
 
                 if not _sim:
                     user_data = {
@@ -309,12 +315,17 @@ def welcome_job() -> dict:
                     if not should_welcome_user(user_data):
                         continue
 
-                author  = str(user.get("author") or "nuevo miembro")
-                topic   = str(user.get("topic")  or "sin tema")
-                disc_id = user.get("disc_id") or MOODLE_DEFAULT_FORUM_ID
-
-                prompt  = WELCOME_PROMPT.format(
-                    community=community, author=author, topic=topic, context=context
+                prompt = (
+                    "Eres el Auditor IA de ProFuturo. Un nuevo miembro acaba de hacer su primer post.\n"
+                    "Escribe un mensaje de bienvenida de maximo 100 palabras que:\n"
+                    "- Salude al nuevo miembro por su nombre\n"
+                    "- Mencione brevemente el tema de su primer post\n"
+                    "- Sugiera uno o dos usuarios o hilos relevantes de la comunidad\n"
+                    "Tono cercano y profesional. Sin emojis. Sin mencionar que eres una IA.\n\n"
+                    f"Comunidad: {community}\n"
+                    f"Nuevo miembro: {author}\n"
+                    f"Primer post (tema): {topic}\n"
+                    f"Contexto de la comunidad: {context}\n"
                 )
                 message = str(llm.invoke(prompt)).strip() + AI_SIGNATURE
                 results["messages_generated"] += 1
