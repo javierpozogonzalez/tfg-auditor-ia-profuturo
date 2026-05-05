@@ -44,6 +44,22 @@ async def lifespan(app: FastAPI):
         start_autonomous_scheduler()
         logger.info("Agente autonomo iniciado")
 
+    if os.getenv("MOODLE_API_TOKEN") and os.getenv("MOODLE_SYNC_COURSE_IDS"):
+        from apscheduler.schedulers.background import BackgroundScheduler
+        from apscheduler.triggers.interval import IntervalTrigger
+        from scripts.moodle_sync import moodle_sync_job
+        _sync_interval = int(os.getenv("MOODLE_SYNC_INTERVAL_HOURS", "6"))
+        _sync_scheduler = BackgroundScheduler()
+        _sync_scheduler.add_job(
+            moodle_sync_job,
+            IntervalTrigger(hours=_sync_interval),
+            id="moodle_sync",
+            name=f"Moodle→Neo4j sync (cada {_sync_interval}h)",
+            max_instances=1,
+        )
+        _sync_scheduler.start()
+        logger.info("Moodle sync scheduler iniciado (cada %dh)", _sync_interval)
+
     yield
 
 
@@ -655,6 +671,23 @@ async def test_mention():
             loop.run_in_executor(_executor, mention_response_job), timeout=120.0
         )
         return {"success": True, "job": "mention_response_job", **(job_result or {})}
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+@app.post("/api/sync/moodle")
+async def trigger_moodle_sync(full: bool = False):
+    """Fuerza una sincronizacion Moodle → Neo4j inmediata."""
+    try:
+        from scripts.moodle_sync import run_sync
+        ids_raw = os.getenv("MOODLE_SYNC_COURSE_IDS", "")
+        ids = [int(x.strip()) for x in ids_raw.split(",") if x.strip().isdigit()]
+        loop = asyncio.get_event_loop()
+        result = await asyncio.wait_for(
+            loop.run_in_executor(_executor, lambda: run_sync(ids, full=full)),
+            timeout=300.0,
+        )
+        return {"success": True, **result}
     except Exception as exc:
         return {"success": False, "error": str(exc)}
 
