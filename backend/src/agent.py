@@ -789,6 +789,26 @@ def get_mandatory_context(community: str) -> str:
     except Exception as exc:
         logger.warning(f"get_user_ranking falló: {exc}")
 
+    # PENDIENTE — roles de Moodle:
+    # Los nodos Author en Neo4j actualmente solo tienen la propiedad 'name'.
+    # Cuando ProFuturo sincronice roles (coordinador, tutor, estudiante, facilitador)
+    # via moodle_sync.py, añadir aquí:
+    #
+    #   roles_text = get_user_roles(community=community)   # nueva función en agent.py
+    #   if roles_text:
+    #       parts.append("Roles de usuarios:\n" + roles_text)
+    #
+    # El Cypher correspondiente sería:
+    #   MATCH (a:Author)-[:WROTE]->(:Post)-[:IN_DISCUSSION]->(:Discussion)
+    #         -[:PERTAINS_TO]->(c:Community {name: $community})
+    #   WHERE a.role IS NOT NULL
+    #   RETURN a.name AS author, a.role AS role
+    #   ORDER BY a.name LIMIT 50
+    #
+    # En moodle_sync.py, añadir al MERGE del Author:
+    #   ON CREATE SET a.role = $role
+    #   ON MATCH SET  a.role = $role   (actualizar si cambia en Moodle)
+
     try:
         parts.append("Tendencias recientes (Neo4j):\n" + get_trending_topics(community=community, days=30))
     except Exception as exc:
