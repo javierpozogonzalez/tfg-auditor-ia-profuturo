@@ -16,7 +16,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import {
   Bot, Send, FileDown, Sparkles, Paperclip, X, Table2,
-  Clock, Plus, MessageSquare, Pencil, Trash2, Check, Square,
+  Clock, Plus, MessageSquare, Pencil, Trash2, Check, Square, Copy,
 } from "lucide-react"
 import { useCommunity } from "@/lib/community-context"
 
@@ -106,6 +106,7 @@ export function AiChat() {
 
   const [editingMsgId, setEditingMsgId] = useState<number | null>(null)
   const [editingMsgContent, setEditingMsgContent] = useState("")
+  const [copiedMsgId, setCopiedMsgId] = useState<number | null>(null)
 
   const { selectedCommunity } = useCommunity()
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -307,6 +308,12 @@ export function AiChat() {
     setEditingMsgContent(msg.content)
   }
 
+  const handleCopyMessage = (msg: Message) => {
+    navigator.clipboard.writeText(msg.content)
+    setCopiedMsgId(msg.id)
+    setTimeout(() => setCopiedMsgId(null), 1500)
+  }
+
   const handleConfirmEdit = (msgId: number) => {
     const newContent = editingMsgContent.trim()
     if (!newContent) return
@@ -452,7 +459,7 @@ export function AiChat() {
           <div className="flex max-w-full flex-col gap-4 min-w-0">
             {messages?.map(msg => (
               <div key={msg.id} className="flex flex-col gap-1">
-                <div className={`flex gap-3 ${msg.role === "user" ? "flex-row-reverse" : "flex-row"}`}>
+                <div className={`group/msg flex gap-3 ${msg.role === "user" ? "flex-row-reverse" : "flex-row"}`}>
                   <Avatar className="mt-0.5 size-7 shrink-0">
                     <AvatarFallback
                       className={
@@ -464,16 +471,35 @@ export function AiChat() {
                       {msg.role === "ai" ? <Sparkles className="size-3.5" /> : "AD"}
                     </AvatarFallback>
                   </Avatar>
+                  {/* Hover action icons — left of user bubble */}
+                  {msg.role === "user" && !msg.loading && editingMsgId !== msg.id && (
+                    <div className="flex items-center gap-0.5 self-center opacity-0 transition-opacity group-hover/msg:opacity-100">
+                      <button
+                        className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                        title="Copiar mensaje"
+                        onClick={() => handleCopyMessage(msg)}
+                      >
+                        {copiedMsgId === msg.id
+                          ? <Check className="size-3.5 text-green-500" />
+                          : <Copy className="size-3.5" />}
+                      </button>
+                      {!isLoading && (
+                        <button
+                          className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                          title="Editar y reenviar"
+                          onClick={() => handleEditMessage(msg)}
+                        >
+                          <Pencil className="size-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  )}
                   <div
                     className={`min-w-0 max-w-[85%] overflow-hidden rounded-xl px-3.5 py-2.5 ${
                       msg.role === "ai"
                         ? "bg-muted text-foreground"
                         : "bg-primary text-primary-foreground"
-                    } ${msg.loading ? "animate-pulse" : ""} ${
-                      msg.role === "user" && !isLoading ? "cursor-pointer hover:opacity-90" : ""
-                    }`}
-                    onClick={() => msg.role === "user" && !msg.loading && handleEditMessage(msg)}
-                    title={msg.role === "user" && !isLoading ? "Clic para editar" : undefined}
+                    } ${msg.loading ? "animate-pulse" : ""}`}
                   >
                     {editingMsgId === msg.id ? (
                       <div className="flex flex-col gap-1.5" onClick={e => e.stopPropagation()}>
