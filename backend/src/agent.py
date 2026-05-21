@@ -1303,7 +1303,9 @@ Adapta la longitud a lo que la pregunta necesita:
   Usa secciones ## cuando el volumen lo justifique.
 
 FORMATO:
-- **negritas** para cifras y conclusiones clave
+- Cualquier respuesta de mas de 2-3 lineas usa formato Markdown: **negritas** para
+  nombres propios, cifras clave y conclusiones importantes; parrafos bien separados.
+  Solo los saludos y agradecimientos van en texto plano sin formato.
 - Tablas |col|col| para rankings y comparativas; 🥇🥈🥉 para el top 3
 - NUNCA repitas el mismo dato dos veces en la misma respuesta
 - NUNCA termines con saludos ni despedidas

@@ -111,6 +111,7 @@ export function AiChat() {
   const { selectedCommunity } = useCommunity()
   const bottomRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
@@ -375,6 +376,7 @@ export function AiChat() {
       clearTimeout(timeout)
       abortControllerRef.current = null
       setIsLoading(false)
+      setTimeout(() => inputRef.current?.focus(), 0)
     }
   }
 
@@ -738,6 +740,7 @@ export function AiChat() {
               <Paperclip className="size-4" />
             </Button>
             <Input
+              ref={inputRef}
               placeholder="Escribe una consulta al Auditor IA..."
               value={inputValue}
               onChange={e => setInputValue(e.target.value)}
