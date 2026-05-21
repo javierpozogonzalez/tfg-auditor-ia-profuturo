@@ -273,7 +273,6 @@ async def chat_stream(request: ChatRequest):
     """Token-by-token SSE streaming para mensajes de texto sin adjuntos."""
     import json as _j
     import re as _re
-    from starlette.concurrency import iterate_in_threadpool
     from src.agent import (
         _build_base_context, _get_community_list, _format_client_history,
         prompt as _agent_prompt, build_excel_data, _DOMAIN_GUARD_RE,
@@ -303,20 +302,46 @@ async def chat_stream(request: ChatRequest):
     llm = get_profuturo_llm()
 
     async def _sse():
-        collected: list[str] = []
-        try:
-            if isinstance(llm, LocalLlamaLLM):
-                async for token in iterate_in_threadpool(llm.stream_tokens(prompt_str)):
-                    collected.append(token)
-                    yield f"data: {_j.dumps({'token': token})}\n\n"
-            else:
-                # SageMaker: blocking call, emitted as a single chunk
+        collected = []  # type: list
+
+        if not isinstance(llm, LocalLlamaLLM):
+            # SageMaker (or any non-streaming backend): single blocking call
+            try:
                 text = await loop.run_in_executor(_executor, lambda: llm._call(prompt_str))
                 collected.append(text)
                 yield f"data: {_j.dumps({'token': text})}\n\n"
-        except Exception as exc:
-            yield f"data: {_j.dumps({'error': str(exc), 'done': True})}\n\n"
-            return
+            except Exception as exc:
+                yield f"data: {_j.dumps({'error': str(exc), 'done': True})}\n\n"
+                return
+        else:
+            # Local llama.cpp streaming via asyncio.Queue (Python 3.10-safe)
+            _queue = asyncio.Queue()  # type: asyncio.Queue
+
+            def _producer():
+                try:
+                    for tok in llm.stream_tokens(prompt_str):
+                        loop.call_soon_threadsafe(_queue.put_nowait, tok)
+                except Exception as _exc:
+                    loop.call_soon_threadsafe(_queue.put_nowait, _exc)
+                finally:
+                    loop.call_soon_threadsafe(_queue.put_nowait, None)
+
+            _future = loop.run_in_executor(_executor, _producer)
+            try:
+                while True:
+                    item = await _queue.get()
+                    if item is None:
+                        break
+                    if isinstance(item, Exception):
+                        yield f"data: {_j.dumps({'error': str(item), 'done': True})}\n\n"
+                        return
+                    collected.append(item)
+                    yield f"data: {_j.dumps({'token': item})}\n\n"
+            finally:
+                try:
+                    await _future
+                except Exception:
+                    pass
 
         full = "".join(collected)
 

@@ -444,8 +444,17 @@ def get_community_kpis(community: str = "todas") -> str:
             f"{r['name']} ({r['discussions']})" for r in connectors
         ))
     if experts:
-        lines.append("Expertos (contenido mas elaborado): " + ", ".join(
-            f"{r['name']} ({int(r.get('avg_len') or 0)} chars/msg)" for r in experts
+        def _expert_label(avg_len):
+            v = int(avg_len or 0)
+            if v > 800:
+                return "mensajes muy elaborados y detallados"
+            if v > 400:
+                return "contribuciones extensas"
+            if v > 200:
+                return "mensajes de extension media"
+            return "contribuciones breves y directas"
+        lines.append("Expertos (contribuidores mas elaborados): " + ", ".join(
+            f"{r['name']} — {_expert_label(r.get('avg_len'))}" for r in experts
         ))
     return "\n".join(lines)
 
@@ -1335,7 +1344,8 @@ def run_agent(input_text: str, community: str = "todas", client_history: list[di
         prev_content = _last_ai_content(client_history)
         if prev_content:
             pdf_ready = prev_content.encode("latin-1", "ignore").decode("latin-1")
-            title = f"Informe_{re.sub(r'[^\\w]', '_', community)[:40]}"
+            _comm_safe = re.sub(r'[^\w]', '_', community)[:40]
+            title = f"Informe_{_comm_safe}"
             pdf_b64 = generate_report_pdf(pdf_ready, title)
             safe = re.sub(r"[^\w\s-]", "", title).strip().replace(" ", "_")[:60]
             filename = f"{safe}.pdf" if safe else "reporte.pdf"

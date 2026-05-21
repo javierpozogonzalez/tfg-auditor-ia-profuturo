@@ -480,7 +480,8 @@ def critical_monitor_job():
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     if len(all_issues) == 1:
         comm      = all_issues[0]
-        filename  = f"ALERTA_{re.sub(r'[^\\w]', '', comm['community'])}_{timestamp}.pdf"
+        _comm_safe = re.sub(r'[^\w]', '', comm['community'])
+        filename  = f"ALERTA_{_comm_safe}_{timestamp}.pdf"
         alert_title = comm["community"]
     else:
         filename    = f"ALERTA_CONSOLIDADA_{timestamp}.pdf"
