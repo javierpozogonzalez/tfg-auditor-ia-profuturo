@@ -487,7 +487,7 @@ async def get_graph(community: str = "todas"):
                     c.name        AS community,
                     count(p)      AS post_count
                 ORDER BY post_count DESC
-                LIMIT 60
+                LIMIT 200
                 """
                 results = session.run(query)
             else:
@@ -500,7 +500,7 @@ async def get_graph(community: str = "todas"):
                     c.name        AS community,
                     count(p)      AS post_count
                 ORDER BY post_count DESC
-                LIMIT 60
+                LIMIT 200
                 """
                 results = session.run(query, community=community)
 
