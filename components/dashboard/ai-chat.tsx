@@ -218,7 +218,7 @@ export function AiChat() {
     setMessages(prev => [
       ...prev,
       { id: Date.now(), role: "user", content: text, files: fileInfo },
-      { id: Date.now() + 1, role: "ai", content: "Procesando tu consulta...", loading: true },
+      { id: Date.now() + 1, role: "ai", content: "", loading: true },
     ])
     setInputValue("")
     const fileToSend = selectedFile
@@ -609,7 +609,13 @@ export function AiChat() {
                           </button>
                         </div>
                       </div>
-                    ) : msg.loading || msg.role === "user" ? (
+                    ) : msg.loading ? (
+                      <div className="flex items-center gap-1 py-1">
+                        <span className="size-2 rounded-full bg-current animate-bounce [animation-delay:-0.3s]" />
+                        <span className="size-2 rounded-full bg-current animate-bounce [animation-delay:-0.15s]" />
+                        <span className="size-2 rounded-full bg-current animate-bounce" />
+                      </div>
+                    ) : msg.role === "user" ? (
                       <p className="break-words text-sm leading-relaxed">{msg.content}</p>
                     ) : (
                       <div className="grid min-w-0">
