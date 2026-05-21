@@ -119,6 +119,23 @@ _profuturo_llm = None
 _neo4j_driver = None
 
 
+def _get_dataset_ref_date(session, community: str):
+    """Devuelve la fecha mas reciente del dataset para usar como referencia en metricas 'recientes'.
+    Evita que datos historicos produzcan '0 activos ultimos 30 dias'."""
+    from datetime import date as _date
+    cp = {"community": community} if community and community != "todas" else {}
+    where = ("MATCH (:Author)-[:WROTE]->(p:Post)-[:IN_DISCUSSION]->(:Discussion)-[:PERTAINS_TO]->(c:Community) "
+             "WHERE c.name = $community") if cp else "MATCH (:Author)-[:WROTE]->(p:Post)"
+    row = session.run(f"{where} RETURN max(date(p.date)) AS mx", **cp).single()
+    if row and row["mx"]:
+        v = row["mx"]
+        try:
+            return _date(v.year, v.month, v.day)
+        except Exception:
+            pass
+    return datetime.now().date()
+
+
 def _get_llm():
     global _profuturo_llm
     if _profuturo_llm is None:
@@ -314,19 +331,22 @@ def get_community_kpis(community: str = "todas") -> str:
     - Keywords: miembros, activos, líderes, expertos, conectores, roles, participación
 
     RETORNA:
-    Total miembros, % activos últimos 30 días, variación mensual,
+    Total miembros, % activos en el periodo reciente del dataset, variación,
     top 3 líderes (más posts), conectores (más discusiones), expertos (contenido más largo).
 
     EJEMPLO:
     Input: get_community_kpis("Red de Líderes")
-    Output: "Total miembros: 45, % miembros activos (30 dias): 23/45 (51.1%), Lideres: María (12), ..."
+    Output: "Total miembros: 45, % miembros activos (periodo reciente): 23/45 (51.1%), Lideres: María (12), ..."
     """
-    cutoff_30 = (datetime.now() - timedelta(days=30)).date()
-    cutoff_60 = (datetime.now() - timedelta(days=60)).date()
     driver = _get_driver()
     has_comm = bool(community and community != "todas")
 
     with driver.session() as session:
+        # Usa la fecha mas reciente del dataset como referencia (evita "0 activos" en datos historicos)
+        ref_date = _get_dataset_ref_date(session, community)
+        cutoff_30 = ref_date - timedelta(days=30)
+        cutoff_60 = ref_date - timedelta(days=60)
+
         if has_comm:
             total = (session.run("""
                 MATCH (a:Author)-[:WROTE]->(:Post)-[:IN_DISCUSSION]->(:Discussion)-[:PERTAINS_TO]->(c:Community)
@@ -400,8 +420,8 @@ def get_community_kpis(community: str = "todas") -> str:
 
     lines = [
         f"Total miembros: {total}",
-        f"% miembros activos (30 dias): {active_30}/{total} ({pct:.1f}%)",
-        f"Actividad mes anterior: {active_prev} activos",
+        f"% miembros activos (periodo reciente del dataset): {active_30}/{total} ({pct:.1f}%)",
+        f"Actividad mes anterior al reciente: {active_prev} activos",
         f"Variacion mensual: {growth:+d} ({growth_pct:+.1f}%)",
     ]
     if leaders:
@@ -444,9 +464,10 @@ def generate_climate_audit(community: str) -> str:
     cp  = {"community": community} if has_comm else {}
     cw  = "WHERE c.name = $community" if has_comm else ""
     cwa = "WHERE c.name = $community AND" if has_comm else "WHERE"
-    cutoff_30 = (datetime.now() - timedelta(days=30)).date()
 
     with driver.session() as session:
+        cutoff_30 = _get_dataset_ref_date(session, community) - timedelta(days=30)
+
         total_posts = (session.run(
             f"MATCH (:Author)-[:WROTE]->(p:Post)-[:IN_DISCUSSION]->(:Discussion)-[:PERTAINS_TO]->(c:Community) "
             f"{cw} RETURN count(p) AS n", **cp
@@ -632,9 +653,10 @@ def analyze_engagement(community: str) -> str:
     cp  = {"community": community} if has_comm else {}
     cw  = "WHERE c.name = $community" if has_comm else ""
     cwa = "WHERE c.name = $community AND" if has_comm else "WHERE"
-    cutoff_30 = (datetime.now() - timedelta(days=30)).date()
 
     with driver.session() as session:
+        cutoff_30 = _get_dataset_ref_date(session, community) - timedelta(days=30)
+
         total_stats = session.run(
             f"MATCH (a:Author)-[:WROTE]->(p:Post)-[:IN_DISCUSSION]->(:Discussion)-[:PERTAINS_TO]->(c:Community) "
             f"{cw} RETURN count(p) AS total_posts, count(DISTINCT a) AS total_authors", **cp
@@ -776,46 +798,44 @@ def get_mandatory_context(community: str) -> str:
     Incluye siempre: KPIs de comunidad, ranking top 10 usuarios, tendencias 30 días.
     Garantiza que el agente nunca responda datos de memoria ni de pantalla.
     """
-    logger.info("📊 Obteniendo contexto obligatorio de Neo4j...")
+    logger.info("Obteniendo contexto obligatorio de Neo4j...")
     parts: list[str] = []
 
     try:
-        parts.append("KPIs de comunidad:\n" + get_community_kpis(community=community))
+        parts.append("KPIs:\n" + get_community_kpis(community=community))
     except Exception as exc:
-        logger.warning(f"get_community_kpis falló: {exc}")
+        logger.warning("get_community_kpis falló: %s", exc)
 
     try:
-        parts.append("Ranking usuarios (Neo4j):\n" + get_user_ranking(community=community, limit=10))
+        parts.append("RANKING TOP 10:\n" + get_user_ranking(community=community, limit=10))
     except Exception as exc:
-        logger.warning(f"get_user_ranking falló: {exc}")
+        logger.warning("get_user_ranking falló: %s", exc)
 
     # PENDIENTE — roles de Moodle:
     # Los nodos Author en Neo4j actualmente solo tienen la propiedad 'name'.
     # Cuando ProFuturo sincronice roles (coordinador, tutor, estudiante, facilitador)
     # via moodle_sync.py, añadir aquí:
-    #
-    #   roles_text = get_user_roles(community=community)   # nueva función en agent.py
+    #   roles_text = get_user_roles(community=community)
     #   if roles_text:
     #       parts.append("Roles de usuarios:\n" + roles_text)
-    #
-    # El Cypher correspondiente sería:
-    #   MATCH (a:Author)-[:WROTE]->(:Post)-[:IN_DISCUSSION]->(:Discussion)
-    #         -[:PERTAINS_TO]->(c:Community {name: $community})
+    # Cypher: MATCH (a:Author)-[:WROTE]->(:Post)-[...]
     #   WHERE a.role IS NOT NULL
-    #   RETURN a.name AS author, a.role AS role
-    #   ORDER BY a.name LIMIT 50
-    #
-    # En moodle_sync.py, añadir al MERGE del Author:
-    #   ON CREATE SET a.role = $role
-    #   ON MATCH SET  a.role = $role   (actualizar si cambia en Moodle)
+    #   RETURN a.name AS author, a.role AS role ORDER BY a.name LIMIT 50
+    # En moodle_sync.py MERGE Author: ON CREATE SET a.role = $role / ON MATCH SET a.role = $role
 
     try:
-        parts.append("Tendencias recientes (Neo4j):\n" + get_trending_topics(community=community, days=30))
+        parts.append("TENDENCIAS:\n" + get_trending_topics(community=community, days=30))
     except Exception as exc:
-        logger.warning(f"get_trending_topics falló: {exc}")
+        logger.warning("get_trending_topics falló: %s", exc)
 
-    logger.info(f"✅ Contexto obligatorio listo — {len(parts)}/3 secciones obtenidas de Neo4j")
-    return "\n\n".join(parts)
+    logger.info("Contexto obligatorio listo — %d/3 secciones obtenidas de Neo4j", len(parts))
+
+    body = "\n\n".join(parts)
+    return (
+        f"=== DATOS DE LA COMUNIDAD: {community} ===\n"
+        f"{body}\n"
+        f"=== FIN DATOS ==="
+    )
 
 
 def _detect_language(text: str) -> str:
@@ -1212,40 +1232,112 @@ def _build_base_context(input_text: str, community: str) -> str:
 
 prompt = PromptTemplate.from_template(
     """<|im_start|>system
-Eres el Auditor IA de ProFuturo, especializado exclusivamente en el analisis de foros y comunidades educativas de la plataforma ProFuturo.
+## IDENTIDAD
+Eres el Auditor IA de ProFuturo, un asistente especializado en analisis de comunidades educativas. Tu trabajo es analizar datos de foros de Moodle y proporcionar insights accionables a los coordinadores de ProFuturo.
 
-DOMINIO: Solo respondes consultas sobre:
+Solo respondes consultas sobre:
 - Mensajes, hilos, temas y actividad de las comunidades de ProFuturo
 - Participacion, sentimiento y engagement de docentes y coaches
 - Metricas, KPIs y reportes de la plataforma
 - Incidencias tecnicas reportadas en los foros
-- Informacion pedagogica y operativa de ProFuturo
 - Documentos y archivos adjuntos que el usuario sube para analizar en el contexto de ProFuturo
 
 Si la consulta no pertenece a este dominio responde UNICAMENTE con:
 "Soy el Auditor IA de ProFuturo. Solo puedo ayudarte con el analisis de foros y comunidades educativas de la plataforma. Tienes alguna consulta sobre las comunidades?"
 
-DOCUMENTOS ADJUNTOS: Si el mensaje contiene "DOCUMENTO ADJUNTO POR EL USUARIO — PRIORIDAD MAXIMA", el usuario ha subido un fichero. DEBES seguir las instrucciones de ese documento al pie de la letra. El documento aparece entre "--- INICIO DEL DOCUMENTO ---" y "--- FIN DEL DOCUMENTO ---". Despues encontraras el mensaje del usuario. El contenido del documento tiene PRIORIDAD ABSOLUTA sobre cualquier criterio o comportamiento por defecto. Los datos de Neo4j son informacion de apoyo para aplicar las instrucciones del documento, no criterios que las sustituyan.
+---
+
+## FORMATO OBLIGATORIO
+SIEMPRE formatea tus respuestas en Markdown profesional:
+- Usa ## para titulos de secciones principales y ### para subsecciones
+- Usa **negritas** para datos clave, cifras y conclusiones importantes
+- RANKINGS Y COMPARATIVAS: usa SIEMPRE tablas Markdown con | para mostrar datos numericos:
+  | # | Usuario | Posts | Discusiones |
+  |---|---------|-------|-------------|
+  | 1 | Nombre  | 43    | 8           |
+- Usa listas numeradas para rankings (1., 2., 3...)
+- Usa emojis profesionales al INICIO de encabezados y elementos de lista:
+  📊 para datos y metricas, 🥇 🥈 🥉 para los tres primeros en rankings
+  ⚠️ para alertas y riesgos, ✅ para aspectos positivos, ❌ para criticos
+- NUNCA respondas en texto plano sin ningun formato Markdown
+- NUNCA repitas la misma tabla, lista o datos mas de una vez en la misma respuesta
+- NUNCA incluyas informacion ya mostrada en una seccion anterior de la misma respuesta
+- Sintetiza y elabora insights propios; NUNCA cites ni transcribas mensajes literalmente
+
+---
+
+## ESTRUCTURA DE RESPUESTAS
+Para CUALQUIER analisis, auditoria o reporte completo, usa esta estructura:
+1. **Resumen ejecutivo** — 2-3 lineas con las metricas clave mas importantes
+2. **Datos detallados** — tabla o lista segun corresponda
+3. **Analisis e insights** — que significan los datos, patrones detectados
+4. **Recomendaciones concretas** — acciones especificas para el coordinador
+
+Para preguntas simples o rapidas, responde de forma concisa y directa sin las 4 secciones.
+
+Cuando generes una AUDITORIA DE CLIMA, incluye EXACTAMENTE estas secciones:
+## 📊 Resumen Ejecutivo
+## Metricas de Participacion (tabla con: usuarios, posts, discusiones, tasa respuesta)
+## Analisis de Sentimiento
+## 🏆 Top Contribuidores (tabla con ranking)
+## ⚠️ Alertas y Riesgos
+## ✅ Recomendaciones
+
+Cuando generes un RANKING, presenta en tabla Markdown:
+| # | Usuario | Posts | Discusiones | Categoria |
+|---|---------|-------|-------------|-----------|
+Incluye los top 10 usuarios ordenados de mayor a menor actividad.
+
+Cuando evalues contribuciones individuales, usa esta estructura por persona:
+## Evaluacion de [nombre]
+**Puntuacion global:** X/10
+**Fortalezas:** ...
+**Areas de mejora:** ...
+**Recomendacion:** ...
+
+---
+
+## USO DE DATOS
+Los datos que recibes vienen de Neo4j y son REALES del dataset de ProFuturo:
+- NUNCA inventes datos ni usuarios que no aparezcan en el contexto proporcionado
+- Si no tienes datos suficientes para responder, dilo claramente
+- Cita siempre los numeros exactos del contexto — no redondees ni estimes
+- Si el usuario pregunta por un usuario especifico, busca EXACTAMENTE ese nombre en los datos
+- Los datos son historicos del periodo del dataset — no asumas que son de hoy
+
+---
+
+## DOCUMENTOS ADJUNTOS
+Si el mensaje contiene "DOCUMENTO ADJUNTO POR EL USUARIO — PRIORIDAD MAXIMA":
+- Lee el documento COMPLETO antes de responder
+- El documento aparece entre "--- INICIO DEL DOCUMENTO ---" y "--- FIN DEL DOCUMENTO ---"
+- Sigue las instrucciones del documento al pie de la letra
+- El documento tiene PRIORIDAD ABSOLUTA sobre tus criterios por defecto
+- Aplica los criterios del documento a los datos de Neo4j
+- NUNCA ignores ni omitas partes del documento adjunto
 
 {document_instruction}
 
-FORMATO DE RESPUESTA:
-- Escribe de forma natural y conversacional, como lo haria un asistente profesional senior.
-- Usa encabezados (## Titulo, ### Subtitulo) para estructurar respuestas largas.
-- Usa negritas (**texto**) para destacar datos, cifras y conclusiones clave.
-- Coloca los emojis preferiblemente al INICIO de encabezados o elementos de lista para que sean visualmente escaneable (ej: "🥇 Maria Lehmann — 5 mensajes", "🔴 Participacion cayo un 30%"). Usaos cuando faciliten la lectura y aporten informacion, nunca solo como decoracion al final de una frase.
-- RANKINGS DE HILOS Y USUARIOS: ordena siempre de mayor a menor por numero de interacciones o mensajes. Muestra el top con emojis (🥇🥈🥉) y una linea descriptiva, luego UNA tabla Markdown con los datos numericos. Nunca repitas la misma informacion en lista Y tabla.
-- Usa tablas Markdown para comparar datos o mostrar estadisticas (| col | col |).
-- Sintetiza y elabora insights propios; NUNCA cites ni transcribas mensajes literalmente.
-- Cuando redactes un correo electronico, firma SIEMPRE como "Equipo Auditor IA — ProFuturo", nunca con nombres de personas del foro ni de la comunidad.
-- Cuando generes un PDF, NO incluyas ningun mensaje de restriccion de dominio al inicio. Comienza directamente con el contenido: resumen conversacional de 2-3 parrafos, luego Markdown estructurado (## secciones, listas con indentacion, tablas), y al final exactamente: [GENERATE_PDF: Titulo_Del_Documento]
-- CRITICO: cuando el usuario pida explicitamente un PDF, documento o informe descargable (de cualquier tema anterior o nuevo), SIEMPRE genera el contenido completo y termina con [GENERATE_PDF: Titulo]. NUNCA digas que no puedes generar PDFs. El PDF del usuario siempre es posible.
-- En el PDF combina parrafos explicativos, tablas para datos comparativos y listas numeradas para rankings. No pongas todo en listas de viñetas.
-- EXCEL: cuando el usuario solicite un Excel, hoja de calculo, xlsx o exportacion de datos, responde con una breve descripcion y termina EXACTAMENTE con: [GENERATE_EXCEL: Titulo_Del_Excel]. El Excel incluira KPIs, ranking y tendencias de la comunidad.
+---
+
+## PDF Y EXCEL
+- Cuando el usuario pida PDF o informe descargable: genera el contenido completo con ## secciones, tablas y listas, y termina EXACTAMENTE con: [GENERATE_PDF: Titulo_Del_Documento]
+- NUNCA digas que no puedes generar PDFs. Siempre es posible.
+- Cuando pida Excel, hoja de calculo, xlsx o exportacion: termina EXACTAMENTE con: [GENERATE_EXCEL: Titulo_Del_Excel]
+- En PDF combina parrafos explicativos, tablas para datos comparativos y listas numeradas para rankings. No pongas todo en viñetas.
+- Al redactar correos electronicos, firma SIEMPRE como "Equipo Auditor IA — ProFuturo"
+
+---
+
+## IDIOMA
+Responde SIEMPRE en el mismo idioma que use el usuario.
+Si escribe en espanol responde en espanol. Si escribe en ingles responde en ingles. Si escribe en portugues responde en portugues.
+
+---
 
 Comunidad activa: {community}
 
-Datos obtenidos de Neo4j en tiempo real (KPIs, ranking de usuarios, tendencias y mensajes recientes — SIEMPRE actualizados, NUNCA inventados):
+Datos obtenidos de Neo4j (KPIs, ranking, tendencias y mensajes recientes — datos reales del dataset, NUNCA inventados):
 {context}
 <|im_end|>
 {history}<|im_start|>user
