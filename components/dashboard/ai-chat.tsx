@@ -235,24 +235,41 @@ export function AiChat() {
     abortControllerRef.current = controller
     const timeout = setTimeout(() => controller.abort(), CHAT_TIMEOUT_MS)
 
+    // Track whether we've already inserted a streaming message (to distinguish
+    // abort-before-stream vs abort-mid-stream for error display)
+    let streamMsgId: number | null = null
+
     try {
-      let response: Response
       const convId = currentConversationId
 
       if (fileToSend) {
+        // ── FILE PATH: keep /api/chat-with-file (no streaming) ──────────────
         const formData = new FormData()
         formData.append("message", text)
         formData.append("community", selectedCommunity)
         formData.append("history_json", JSON.stringify(recentHistory))
         formData.append("file", fileToSend)
         if (convId) formData.append("conversation_id", convId)
-        response = await fetch(`${API_URL}/api/chat-with-file`, {
+        const response = await fetch(`${API_URL}/api/chat-with-file`, {
           method: "POST",
           body: formData,
           signal: controller.signal,
         })
+        if (!response.ok) throw new Error(`HTTP ${response.status}`)
+        const data = await response.json()
+        if (data.conversation_id) {
+          if (!currentConversationId) setCurrentConversationId(data.conversation_id)
+          fetchConversations(selectedCommunity)
+        }
+        const pdf = data.pdf?.base64 && data.pdf?.filename ? data.pdf as Message["pdf"] : undefined
+        const excel = data.excel?.base64 && data.excel?.filename ? data.excel as Message["excel"] : undefined
+        appendAIMessage(data.response || "Sin respuesta del servidor.", pdf, excel)
+        if (pdf) triggerPDFDownload(pdf)
+        if (excel) triggerExcelDownload(excel)
+
       } else {
-        response = await fetch(`${API_URL}/api/chat`, {
+        // ── STREAMING PATH: /api/chat-stream ─────────────────────────────────
+        const response = await fetch(`${API_URL}/api/chat-stream`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -264,32 +281,84 @@ export function AiChat() {
           }),
           signal: controller.signal,
         })
+        if (!response.ok) throw new Error(`HTTP ${response.status}`)
+        if (!response.body) throw new Error("No stream body")
+
+        // Replace loading bubble with an empty live message
+        streamMsgId = Date.now() + 2
+        const sid = streamMsgId
+        setMessages(prev => prev.filter(m => !m.loading).concat({
+          id: sid, role: "ai", content: "", loading: false,
+        }))
+
+        const reader = response.body.getReader()
+        const decoder = new TextDecoder()
+        let buf = ""
+        let accumulated = ""
+        let pdf: Message["pdf"] | undefined
+        let excel: Message["excel"] | undefined
+        let newConvId: string | null = null
+
+        outer: while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buf += decoder.decode(value, { stream: true })
+          const lines = buf.split("\n")
+          buf = lines.pop() ?? ""
+
+          for (const line of lines) {
+            if (!line.startsWith("data: ")) continue
+            const payload = line.slice(6).trim()
+            if (!payload || payload === "[DONE]") continue
+
+            let ev: {
+              token?: string
+              done?: boolean
+              full_response?: string
+              conversation_id?: string
+              pdf?: { base64: string; filename: string }
+              excel?: { base64: string; filename: string }
+              error?: string
+            }
+            try { ev = JSON.parse(payload) } catch { continue }
+
+            if (ev.token) {
+              accumulated += ev.token
+              setMessages(prev => prev.map(m => m.id === sid ? { ...m, content: accumulated } : m))
+            }
+            if (ev.done) {
+              if (ev.full_response) accumulated = ev.full_response
+              if (ev.conversation_id) newConvId = ev.conversation_id
+              if (ev.pdf?.base64 && ev.pdf?.filename) pdf = ev.pdf
+              if (ev.excel?.base64 && ev.excel?.filename) excel = ev.excel
+              break outer
+            }
+            if (ev.error) {
+              accumulated = "Error al procesar la consulta. Inténtalo de nuevo."
+              break outer
+            }
+          }
+        }
+
+        setMessages(prev => prev.map(m =>
+          m.id === sid ? { ...m, content: accumulated || "Sin respuesta del servidor.", pdf, excel } : m
+        ))
+        if (newConvId) {
+          if (!currentConversationId) setCurrentConversationId(newConvId)
+          fetchConversations(selectedCommunity)
+        }
+        if (pdf) triggerPDFDownload(pdf)
+        if (excel) triggerExcelDownload(excel)
       }
 
-      if (!response.ok) throw new Error(`HTTP ${response.status}`)
-      const data = await response.json()
-
-      if (data.conversation_id) {
-        if (!currentConversationId) setCurrentConversationId(data.conversation_id)
-        fetchConversations(selectedCommunity)
-      }
-
-      const pdf = data.pdf?.base64 && data.pdf?.filename
-        ? { base64: data.pdf.base64, filename: data.pdf.filename }
-        : undefined
-      const excel = data.excel?.base64 && data.excel?.filename
-        ? { base64: data.excel.base64, filename: data.excel.filename }
-        : undefined
-
-      appendAIMessage(data.response || "Sin respuesta del servidor.", pdf, excel)
-      if (pdf) triggerPDFDownload(pdf)
-      if (excel) triggerExcelDownload(excel)
     } catch (error: unknown) {
-      if (error instanceof Error && error.name === "AbortError") {
-        const timedOut = !abortControllerRef.current || abortControllerRef.current.signal.aborted
-        appendAIMessage(timedOut ? "Consulta cancelada." : "La consulta superó el tiempo máximo (600s). Reintenta.")
+      const isAbort = error instanceof Error && error.name === "AbortError"
+      const errText = isAbort ? "Consulta cancelada." : `Error al conectar con el servidor en ${API_URL}. Asegúrate de que el backend esté en ejecución.`
+      if (streamMsgId !== null) {
+        // Already started streaming — update the streaming message instead of appending
+        setMessages(prev => prev.map(m => m.id === streamMsgId ? { ...m, content: errText } : m))
       } else {
-        appendAIMessage(`Error al conectar con el servidor en ${API_URL}. Asegúrate de que el backend esté en ejecución.`)
+        appendAIMessage(errText)
       }
     } finally {
       clearTimeout(timeout)

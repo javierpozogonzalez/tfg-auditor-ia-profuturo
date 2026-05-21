@@ -76,6 +76,41 @@ class LocalLlamaLLM(LLM):
             logger.exception("Error invocando llama.cpp local")
             raise RuntimeError(f"Error llamando a llama.cpp en {self.base_url}: {exc}") from exc
 
+    def stream_tokens(self, prompt: str, stop: Optional[List[str]] = None):
+        """Generator que emite tokens de texto uno a uno usando la API SSE de llama.cpp."""
+        messages = self._parse_chatml(prompt)
+        if not messages:
+            messages = [
+                {"role": "system", "content": "Eres el Auditor IA de ProFuturo. Analiza foros educativos."},
+                {"role": "user", "content": prompt},
+            ]
+
+        payload: Dict[str, Any] = {
+            "model": "qwen",
+            "messages": messages,
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+            "stop": stop or ["<|im_end|>", "<|endoftext|>"],
+            "stream": True,
+        }
+
+        with httpx.Client(timeout=120.0) as client:
+            with client.stream("POST", f"{self.base_url}/v1/chat/completions", json=payload) as resp:
+                resp.raise_for_status()
+                for line in resp.iter_lines():
+                    if not line or line == "data: [DONE]":
+                        continue
+                    if line.startswith("data: "):
+                        data_str = line[6:]
+                        try:
+                            data = json.loads(data_str)
+                            delta = data["choices"][0].get("delta", {})
+                            content = delta.get("content", "")
+                            if content:
+                                yield content
+                        except (json.JSONDecodeError, KeyError, IndexError):
+                            continue
+
 
 # ── QwenTGILLM (SageMaker) ────────────────────────────────────────────────────
 

@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -265,6 +266,131 @@ async def chat(request: ChatRequest):
             excel=None,
             success=False,
         )
+
+
+@app.post("/api/chat-stream")
+async def chat_stream(request: ChatRequest):
+    """Token-by-token SSE streaming para mensajes de texto sin adjuntos."""
+    import json as _j
+    import re as _re
+    from starlette.concurrency import iterate_in_threadpool
+    from src.agent import (
+        _build_base_context, _get_community_list, _format_client_history,
+        prompt as _agent_prompt, build_excel_data, _DOMAIN_GUARD_RE,
+    )
+    from src.llm_config import get_profuturo_llm, LocalLlamaLLM
+    from scripts.utils import apply_current_report_dates
+
+    if not request.message or len(request.message.strip()) == 0:
+        raise HTTPException(status_code=400, detail="Message cannot be empty")
+
+    loop = asyncio.get_event_loop()
+
+    def _build_prompt() -> str:
+        ctx = _build_base_context(request.message, request.community)
+        cl  = _get_community_list()
+        his = _format_client_history(request.history or [])
+        return _agent_prompt.format(
+            input=request.message,
+            community=request.community,
+            community_list=cl,
+            context=ctx,
+            history=his,
+            document_instruction="",
+        )
+
+    prompt_str = await loop.run_in_executor(_executor, _build_prompt)
+    llm = get_profuturo_llm()
+
+    async def _sse():
+        collected: list[str] = []
+        try:
+            if isinstance(llm, LocalLlamaLLM):
+                async for token in iterate_in_threadpool(llm.stream_tokens(prompt_str)):
+                    collected.append(token)
+                    yield f"data: {_j.dumps({'token': token})}\n\n"
+            else:
+                # SageMaker: blocking call, emitted as a single chunk
+                text = await loop.run_in_executor(_executor, lambda: llm._call(prompt_str))
+                collected.append(text)
+                yield f"data: {_j.dumps({'token': text})}\n\n"
+        except Exception as exc:
+            yield f"data: {_j.dumps({'error': str(exc), 'done': True})}\n\n"
+            return
+
+        full = "".join(collected)
+
+        # Cleanup endings and stray ChatML tokens
+        for ending in ["Saludos!", "¡Saludos!", "Un saludo.", "Un saludo!", "¡Un saludo!", "Saludos.", "📘💬", "💬📘"]:
+            if full.rstrip().endswith(ending):
+                full = full.rstrip()[:-len(ending)].rstrip()
+        for tok in ["<|im_end|>", "<|im_start|>", "<|endoftext|>"]:
+            full = full.replace(tok, "")
+        full = full.strip()
+        full = apply_current_report_dates(full)
+
+        pdf_payload: dict | None = None
+        excel_payload: dict | None = None
+
+        excel_m = _re.search(r"\[?GENERATE_EXCEL:\s*([^\]\n\[]+)\]?", full)
+        if excel_m:
+            try:
+                et = excel_m.group(1).strip()
+                from src.tools import generate_report_excel
+                edata = await loop.run_in_executor(_executor, lambda: build_excel_data(request.community))
+                eb64  = await loop.run_in_executor(_executor, lambda: generate_report_excel(edata, et))
+                safe_e = _re.sub(r"[^\w\s-]", "", et).strip().replace(" ", "_")[:60]
+                efn = f"{safe_e}.xlsx" if safe_e else "reporte.xlsx"
+                full = _re.sub(r"\[?GENERATE_EXCEL:[^\]\n\[]+\]?", "", full).strip()
+                full += f"\n\n**Excel generado:** {efn}"
+                excel_payload = {"base64": eb64, "filename": efn}
+            except Exception as exc2:
+                full = _re.sub(r"\[?GENERATE_EXCEL:[^\]\n\[]+\]?", "", full).strip()
+                full += f"\n\n_(Error generando Excel: {exc2})_"
+
+        pdf_m = _re.search(r"\[?GENERATE_PDF:\s*([^\]\n\[]+)\]?", full)
+        if pdf_m:
+            try:
+                pt = pdf_m.group(1).strip()
+                before = full[:pdf_m.start()].rstrip()
+                after  = full[pdf_m.end():].lstrip()
+                content = before if len(before) >= len(after) else after
+                content = _DOMAIN_GUARD_RE.sub("", content).strip()
+                content = _re.sub(r"\[?GENERATE_PDF:[^\]\n]+\]?", "", content).strip()
+                from src.tools import generate_report_pdf
+                pb64 = await loop.run_in_executor(
+                    _executor,
+                    lambda: generate_report_pdf(content.encode("latin-1", "ignore").decode("latin-1"), pt),
+                )
+                safe_t = _re.sub(r"[^\w\s-]", "", pt).strip().replace(" ", "_")[:60]
+                pfn = f"{safe_t}.pdf" if safe_t else "reporte.pdf"
+                full = content + f"\n\n**PDF generado:** {pfn}"
+                pdf_payload = {"base64": pb64, "filename": pfn}
+            except Exception as exc3:
+                full = _re.sub(r"\[?GENERATE_PDF:[^\]\n\[]+\]?", "", full).strip()
+                full += f"\n\n_(Error generando PDF: {exc3})_"
+
+        # Persist conversation (best-effort)
+        conv_id = request.conversation_id
+        try:
+            if not conv_id:
+                title_c = generate_title_from_message(request.message)
+                conv_id = create_conversation(request.community, title_c)
+            save_conv_message(conv_id, "user", request.message, request.files)
+            save_conv_message(conv_id, "assistant", full)
+        except Exception as _e:
+            logger.warning(f"Could not persist streaming conversation: {_e}")
+            conv_id = None
+
+        final: dict = {"done": True, "full_response": full, "conversation_id": conv_id}
+        if pdf_payload:
+            final["pdf"] = pdf_payload
+        if excel_payload:
+            final["excel"] = excel_payload
+
+        yield f"data: {_j.dumps(final)}\n\n"
+
+    return StreamingResponse(_sse(), media_type="text/event-stream")
 
 
 @app.post("/api/chat-with-file")
