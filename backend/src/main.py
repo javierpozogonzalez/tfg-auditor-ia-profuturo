@@ -329,8 +329,8 @@ async def chat_stream(request: ChatRequest):
         full = full.strip()
         full = apply_current_report_dates(full)
 
-        pdf_payload: dict | None = None
-        excel_payload: dict | None = None
+        pdf_payload = None   # type: Optional[dict]
+        excel_payload = None  # type: Optional[dict]
 
         excel_m = _re.search(r"\[?GENERATE_EXCEL:\s*([^\]\n\[]+)\]?", full)
         if excel_m:

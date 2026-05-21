@@ -284,12 +284,8 @@ export function AiChat() {
         if (!response.ok) throw new Error(`HTTP ${response.status}`)
         if (!response.body) throw new Error("No stream body")
 
-        // Replace loading bubble with an empty live message
-        streamMsgId = Date.now() + 2
-        const sid = streamMsgId
-        setMessages(prev => prev.filter(m => !m.loading).concat({
-          id: sid, role: "ai", content: "", loading: false,
-        }))
+        // Loading bubble stays visible until the first token arrives.
+        // streamMsgId is set on first token so it's accessible in the catch block.
 
         const reader = response.body.getReader()
         const decoder = new TextDecoder()
@@ -324,7 +320,17 @@ export function AiChat() {
 
             if (ev.token) {
               accumulated += ev.token
-              setMessages(prev => prev.map(m => m.id === sid ? { ...m, content: accumulated } : m))
+              if (streamMsgId === null) {
+                // First token — replace loading bubble with the live message
+                const sid = Date.now() + 2
+                streamMsgId = sid
+                setMessages(prev => prev.filter(m => !m.loading).concat({
+                  id: sid, role: "ai", content: accumulated, loading: false,
+                }))
+              } else {
+                const sid = streamMsgId
+                setMessages(prev => prev.map(m => m.id === sid ? { ...m, content: accumulated } : m))
+              }
             }
             if (ev.done) {
               if (ev.full_response) accumulated = ev.full_response
@@ -340,9 +346,14 @@ export function AiChat() {
           }
         }
 
-        setMessages(prev => prev.map(m =>
-          m.id === sid ? { ...m, content: accumulated || "Sin respuesta del servidor.", pdf, excel } : m
-        ))
+        if (streamMsgId !== null) {
+          const sid = streamMsgId
+          setMessages(prev => prev.map(m =>
+            m.id === sid ? { ...m, content: accumulated || "Sin respuesta del servidor.", pdf, excel } : m
+          ))
+        } else {
+          appendAIMessage(accumulated || "Sin respuesta del servidor.", pdf, excel)
+        }
         if (newConvId) {
           if (!currentConversationId) setCurrentConversationId(newConvId)
           fetchConversations(selectedCommunity)

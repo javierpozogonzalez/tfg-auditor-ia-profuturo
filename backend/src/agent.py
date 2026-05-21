@@ -860,11 +860,15 @@ def get_mandatory_context(community: str) -> str:
 
     logger.info("Contexto obligatorio listo — %d/3 secciones obtenidas de Neo4j", len(parts))
 
+    logger.info(
+        "get_mandatory_context completado para community=%r — %d secciones obtenidas",
+        community, len(parts),
+    )
     body = "\n\n".join(parts)
     return (
-        f"=== DATOS DE LA COMUNIDAD: {community} ===\n"
+        f"=== DATOS EXCLUSIVOS DE LA COMUNIDAD '{community}' ===\n"
         f"{body}\n"
-        f"=== FIN DATOS ==="
+        f"=== FIN DATOS COMUNIDAD '{community}' ==="
     )
 
 
@@ -1265,12 +1269,19 @@ def _build_base_context(input_text: str, community: str) -> str:
 prompt = PromptTemplate.from_template(
     """<|im_start|>system
 Eres el Auditor IA de ProFuturo, especializado en el analisis de comunidades educativas.
+Estas analizando EXCLUSIVAMENTE la comunidad: {community}.
 
-TONO Y EXTENSION:
-- Para preguntas concretas (un dato, un nombre, un numero): responde directo en 2-4 lineas.
-- Para analisis, auditorias o reportes: adapta la profundidad a la pregunta. Incluye siempre
-  una vision narrativa del estado general, cifras clave y al menos 2 recomendaciones practicas.
-  Usa secciones con ## cuando el contenido lo justifique, no por defecto.
+COMO RESPONDER:
+Adapta la longitud a lo que la pregunta necesita:
+- Datos puntuales: responde con el dato y el contexto necesario para entenderlo.
+- Perfiles de usuario: describe su comportamiento de forma cualitativa (p.ej. "participa
+  activamente en debates tecnicas", "escribe mensajes extensos y elaborados", "suele
+  responder a otros miembros"). NO incluyas metricas tecnicas como "X caracteres por
+  mensaje" — aportan poco y resultan mecanicas.
+- Analisis, auditorias o reportes: incluye siempre una lectura narrativa de lo que
+  significan los datos (no solo listas de numeros), los indicadores mas relevantes,
+  patrones que detectas, y recomendaciones practicas y priorizadas para el coordinador.
+  Usa secciones ## cuando el volumen lo justifique.
 
 FORMATO:
 - **negritas** para cifras y conclusiones clave
@@ -1290,10 +1301,9 @@ EXCEL: termina con [GENERATE_EXCEL: Titulo]
 USA SOLO los datos del contexto. NUNCA inventes numeros ni usuarios.
 Responde en el idioma del usuario.
 
-Comunidad activa: {community}
 Comunidades disponibles: {community_list}
 
-DATOS REALES DE NEO4J:
+DATOS REALES DE NEO4J — COMUNIDAD {community}:
 {context}
 <|im_end|>
 {history}<|im_start|>user
@@ -1310,6 +1320,7 @@ _DOMAIN_GUARD_RE = re.compile(
 
 
 def run_agent(input_text: str, community: str = "todas", client_history: list[dict] = None) -> dict:
+    logger.info("run_agent llamado: community=%r, input=%r", community, input_text[:80])
     if not input_text.strip():
         return {"response": "Por favor, ingresa una consulta.", "pdf_base64": None, "pdf_filename": "",
                 "excel_base64": None, "excel_filename": ""}
@@ -1470,8 +1481,12 @@ def run_agent(input_text: str, community: str = "todas", client_history: list[di
 
     final_response = apply_current_report_dates(final_response)
 
-    memory.chat_memory.add_user_message(f"<|im_start|>user\n{input_text}<|im_end|>")
-    memory.chat_memory.add_ai_message(f"<|im_start|>assistant\n{final_response}<|im_end|>")
+    # Solo persistimos en la memoria de servidor cuando el frontend NO envía su propio historial.
+    # Cuando client_history está presente, el frontend gestiona el contexto: escribir aquí
+    # contaminaría la memoria con datos de otras comunidades entre sesiones.
+    if not client_history:
+        memory.chat_memory.add_user_message(f"<|im_start|>user\n{input_text}<|im_end|>")
+        memory.chat_memory.add_ai_message(f"<|im_start|>assistant\n{final_response}<|im_end|>")
 
     return {
         "response":       final_response,
