@@ -21,6 +21,8 @@ from neo4j import GraphDatabase
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 load_dotenv()
 
+from scripts.clean_data import clean_html, analyze_sentiment
+
 # ── Config ────────────────────────────────────────────────────────────────────
 NEO4J_URI      = os.getenv("NEO4J_URI")
 NEO4J_USER     = os.getenv("NEO4J_USER")
@@ -188,6 +190,20 @@ def run_sync(course_ids: list[int], full: bool = False) -> dict:
                                     skipped += 1
                                     continue
 
+                                raw_content   = post.get("message", "")
+                                clean_content = clean_html(raw_content)
+                                if len(clean_content.strip()) < 10:
+                                    skipped += 1
+                                    continue
+                                post_sentiment = analyze_sentiment(clean_content)
+                                logger.info(
+                                    "Post %s limpiado: %d → %d chars, sentimiento: %s",
+                                    post.get("id"),
+                                    len(raw_content),
+                                    len(clean_content),
+                                    post_sentiment,
+                                )
+
                                 _upsert_post(
                                     session,
                                     community   = community,
@@ -196,8 +212,9 @@ def run_sync(course_ids: list[int], full: bool = False) -> dict:
                                     topic       = disc_topic,
                                     disc_created= disc_created,
                                     post_id     = str(post.get("id")),
-                                    content     = post.get("message", ""),
+                                    content     = clean_content,
                                     date_iso    = post_ts.isoformat(),
+                                    sentiment   = post_sentiment,
                                 )
                                 inserted += 1
                                 new_in_page += 1
