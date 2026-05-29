@@ -4,6 +4,7 @@ import re
 import base64
 import logging
 import smtplib
+import time
 from collections import Counter
 from datetime import datetime, timedelta
 from email import encoders
@@ -408,6 +409,7 @@ def weekly_reminder_job():
             )
             prompt  = REMINDER_PROMPT.format(community=community, context=context)
             message = str(llm.invoke(prompt)).strip()
+            time.sleep(5)
 
             driver = _get_driver()
             try:
@@ -520,6 +522,7 @@ def mention_monitor_job():
                 continue
 
             result = run_agent(question, mention["community"])
+            time.sleep(5)
             reply  = result.get("response", "").strip()
 
             if reply:
@@ -777,6 +780,7 @@ def doubt_suggestion_monitor_job():
                 f"Proporciona un resumen ejecutivo y recomendaciones de accion prioritaria."
             )
             analysis = str(llm.invoke(prompt)).strip()
+            time.sleep(5)
             logger.info(f"Dudas/sugerencias en '{community}': {len(doubts)} dudas, {len(suggestions)} sugerencias")
 
             send_admin_email(
@@ -821,6 +825,7 @@ def material_feedback_monitor_job():
                 f"(3) sugerencias de mejora. Genera un resumen ejecutivo con alertas si hay criticas graves."
             )
             analysis = str(llm.invoke(prompt)).strip()
+            time.sleep(5)
 
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             safe_comm = re.sub(r"[^\w]", "", community)

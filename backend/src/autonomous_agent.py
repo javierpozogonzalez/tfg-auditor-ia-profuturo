@@ -8,6 +8,7 @@ import logging
 import os
 import re
 import sys
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -207,6 +208,7 @@ def reactivation_job() -> dict:
 
                 prompt  = REACTIVATION_PROMPT.format(community=community, topic=topic)
                 message = str(llm.invoke(prompt)).strip() + AI_SIGNATURE
+                time.sleep(5)
                 results["messages_generated"] += 1
                 if not results["sample_message"]:
                     results["sample_message"] = message[:300]
@@ -328,6 +330,7 @@ def welcome_job() -> dict:
                     f"Contexto de la comunidad: {context}\n"
                 )
                 message = str(llm.invoke(prompt)).strip() + AI_SIGNATURE
+                time.sleep(5)
                 results["messages_generated"] += 1
                 if not results["sample_message"]:
                     results["sample_message"] = message[:300]
@@ -455,6 +458,7 @@ def mention_response_job() -> dict:
                 community=community, author=author, question=question, context=context
             )
             message = str(llm.invoke(prompt)).strip() + AI_SIGNATURE
+            time.sleep(5)
             results["messages_generated"] += 1
             if not results["sample_message"]:
                 results["sample_message"] = message[:300]
@@ -537,6 +541,7 @@ def weekly_digest_post_job() -> None:
 
             prompt  = WEEKLY_DIGEST_PROMPT.format(community=community, data=data)
             message = str(llm.invoke(prompt)).strip() + AI_SIGNATURE
+            time.sleep(5)
             subject = f"Resumen semanal — {community} — {datetime.now().strftime('%d/%m/%Y')}"
 
             result = create_forum_discussion(
@@ -596,6 +601,7 @@ def recognition_job() -> None:
                 community=community, author=author, post_count=post_count, topics=topics
             )
             message = str(llm.invoke(prompt)).strip() + AI_SIGNATURE
+            time.sleep(5)
             subject = f"Reconocimiento semanal — {community}"
 
             result = create_forum_discussion(
@@ -687,6 +693,7 @@ def bug_detection_job() -> None:
                     f"Tono profesional y tranquilizador. Sin emojis."
                 )
                 message = str(llm.invoke(prompt)).strip() + AI_SIGNATURE
+                time.sleep(5)
                 result  = create_forum_discussion(
                     forum_id=MOODLE_DEFAULT_FORUM_ID,
                     subject=f"Aviso tecnico — {community}",
