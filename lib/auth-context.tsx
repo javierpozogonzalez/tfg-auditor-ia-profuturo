@@ -12,7 +12,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
 const VALID_USERS: Record<string, string> = {
   admin:      "adminProFuturo",
-  aoinia:     "aoinia1234",
+  aonia:      "aonia1234",
   formacion:  "formacion1234",
 }
 const STORAGE_KEY = "profuturo_auth"
