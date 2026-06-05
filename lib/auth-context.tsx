@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useContext, useState, ReactNode } from "react"
+import { createContext, useContext, useState, useEffect, ReactNode } from "react"
 
 interface AuthContextType {
   isAuthenticated: boolean
@@ -10,21 +10,35 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
-const VALID_USER = "admin"
-const VALID_PASS = "adminProFuturo"
+const VALID_USERS: Record<string, string> = {
+  admin:      "adminProFuturo",
+  aoinia:     "aoinia1234",
+  formacion:  "formacion1234",
+}
+const STORAGE_KEY = "profuturo_auth"
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
 
+  useEffect(() => {
+    if (localStorage.getItem(STORAGE_KEY) === "1") {
+      setIsAuthenticated(true)
+    }
+  }, [])
+
   const login = (user: string, pass: string): boolean => {
-    if (user === VALID_USER && pass === VALID_PASS) {
+    if (VALID_USERS[user] === pass) {
+      localStorage.setItem(STORAGE_KEY, "1")
       setIsAuthenticated(true)
       return true
     }
     return false
   }
 
-  const logout = () => setIsAuthenticated(false)
+  const logout = () => {
+    localStorage.removeItem(STORAGE_KEY)
+    setIsAuthenticated(false)
+  }
 
   return (
     <AuthContext.Provider value={{ isAuthenticated, login, logout }}>
