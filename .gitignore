@@ -46,3 +46,13 @@ backend/train.jsonl
 # Generated output
 *.pdf
 backend/alerts/
+
+# SQLite databases
+*.db
+chat_conversations.db
+
+# Build artifacts
+tsconfig.tsbuildinfo
+
+# Dev notes
+docs/
