@@ -179,7 +179,7 @@ def _header_footer(canvas, doc):
     canvas.saveState()
     w, h = A4
 
-    logo_path = str(Path(__file__).resolve().parent.parent.parent / "logo.png")
+    logo_path = str(Path(__file__).resolve().parent.parent.parent / "public" / "logo.png")
     if os.path.exists(logo_path):
         canvas.drawImage(logo_path, MARGIN, h - 14 * mm, width=30 * mm, height=12 * mm,
                          preserveAspectRatio=True, mask="auto")
@@ -492,7 +492,7 @@ def generate_report_excel(data: dict, title: str) -> str:
             ws_cv.cell(r, c).fill = blue_fill
 
     # Logo
-    logo_path = str(Path(__file__).resolve().parent.parent.parent / "logo.png")
+    logo_path = str(Path(__file__).resolve().parent.parent.parent / "public" / "logo.png")
     if os.path.exists(logo_path):
         try:
             from openpyxl.drawing.image import Image as XLImage
